@@ -1,0 +1,9 @@
+# WebView2 wrapper DLLs are downloaded on first run
+lib/*.dll
+*.zip
+*.log
+*.tmp
+# editor and OS noise
+.vscode/
+.DS_Store
+Thumbs.db
