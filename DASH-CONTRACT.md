@@ -139,7 +139,7 @@ The host builds this before `Initialize-Dash` and keeps it for the dash's lifeti
 | `Root` | string | the dash folder | the dash folder |
 | `Post` | scriptblock `{ param([string]$Json) }` | posts to its own WebView2 | posts to that dash's WebView2 |
 | `Close` | scriptblock | closes its window | closes the whole launcher |
-| `Relaunch` | string | path to the dash's `.bat` | path to `Start-DashLauncher.bat` |
+| `Relaunch` | string | command line: the dash's `.bat` | command line: `Start-DashLauncher.bat -Open <id>` |
 | `HostPid` | int | its own process id | the launcher's process id |
 | `Theme` | string | `''` (the dash uses its own setting) | `'light'`, `'dark'` or `'system'` |
 | `LauncherVersion` | string | `''` | the launcher's version |
@@ -179,8 +179,13 @@ cache and settings.
 ## Updates
 
 Each dash keeps its own updater. When an update is applied, the dash calls `Context.Close`, and its apply helper waits
-for `Context.HostPid` to exit and then starts `Context.Relaunch`. Installed from the launcher, an update therefore
-reopens the launcher. A dash never edits the launcher's files, and the launcher never edits a dash's files.
+for `Context.HostPid` to exit and then runs the `Context.Relaunch` command line as given. Installed from the launcher,
+an update therefore reopens the launcher with that dash's tab already open (`-Open <id>`), so the dash's page loads and
+can confirm the new version started, exactly as it does standalone. If the dash fails to initialize or its page never
+loads, nothing confirms and the dash's own updater rolls back.
+
+A dash confirms a new version when its page loads, not in `Initialize-Dash`: page load proves the backend and the UI
+both work. A dash never edits the launcher's files, and the launcher never edits a dash's files.
 
 ## Fetching rules
 
