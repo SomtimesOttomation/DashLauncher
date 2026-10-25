@@ -10,17 +10,83 @@ const ICON = {
 };
 
 const root = document.getElementById('card');
+let current = null;
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
 function head(icon, tone, title) {
   return `<div class="card-head"><span class="card-icon ${tone}">${ICON[icon]}</span><h1>${esc(title)}</h1></div>`;
 }
 
+function notesHtml(md) {
+  // release notes are short markdown: **Label** lines and "- " items
+  const out = []; let list = false;
+  for (const raw of String(md || '').split(/\r?\n/)) {
+    const line = raw.trim();
+    const item = /^[-*] (.*)$/.exec(line);
+    if (item) { if (!list) { out.push('<ul>'); list = true; } out.push(`<li>${esc(item[1]).replace(/\*\*(.+?)\*\*/g, '<b>$1</b>')}</li>`); continue; }
+    if (list) { out.push('</ul>'); list = false; }
+    const head = /^(?:#+\s*|\*\*)(.+?)(?:\*\*)?$/.exec(line);
+    if (head) out.push(`<h3>${esc(head[1])}</h3>`);
+    else if (line) out.push(`<p>${esc(line)}</p>`);
+  }
+  if (list) out.push('</ul>');
+  return out.join('');
+}
+
+function updateHtml(n) {
+  const u = n.update || {};
+  const when = u.published ? new Date(u.published).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' }) : '';
+  let body = '';
+  switch (u.status) {
+    case 'available':
+      body = head('download', 'info', `DashLauncher v${u.latest} is available`) +
+        `<p>You have v${esc(u.current)}.${when ? ` Released ${esc(when)}.` : ''}</p>` +
+        (u.notes ? `<div class="notes">${notesHtml(u.notes)}</div>` : '') +
+        (u.installable ? `<div class="actions"><button class="btn primary" data-act="ustage">Download and check v${esc(u.latest)}</button></div>`
+                       : '<p class="note">This release has no update package attached yet. Try again in a few minutes.</p>');
+      break;
+    case 'downloading':
+      body = head('download', 'info', `Downloading DashLauncher v${esc(u.latest || '')}`) +
+        `<div class="progress"><div style="width:${Math.max(2, u.pct || 0)}%"></div></div><p class="note">${esc(u.text || '')}</p>
+         <div class="actions"><button class="btn" data-act="ucancel">Cancel</button></div>`;
+      break;
+    case 'staged':
+      body = head('download', 'info', `DashLauncher v${esc(u.latest)} is ready to install`) +
+        `<p>It was downloaded and its checksum matched. DashLauncher will close, replace its own files, and reopen.</p>
+         <p>Your dashboard modules and settings are not changed. If the new version doesn't start, the old one comes back by itself.</p>
+         <div class="actions"><button class="btn primary" data-act="uapply">Install and restart</button></div>`;
+      break;
+    case 'current':
+      body = head('folder', 'info', 'DashLauncher is up to date') + `<p>You have the latest version, v${esc(u.current)}.</p>
+        <div class="actions"><button class="btn" data-act="ucheck">Check again</button></div>`;
+      break;
+    case 'ahead':
+      body = head('folder', 'info', 'This copy is newer than the latest release') + `<p>You have v${esc(u.current)}; the latest published release is v${esc(u.latest)}.</p>`;
+      break;
+    case 'none':
+      body = head('folder', 'info', 'No DashLauncher release yet') + `<p>Nothing has been published on GitHub yet.</p>
+        <div class="actions"><button class="btn" data-act="ucheck">Check again</button></div>`;
+      break;
+    case 'error':
+      body = head('warn', 'warn', "Couldn't check for updates") + `<pre>${esc(u.error)}</pre>
+        <div class="actions"><button class="btn primary" data-act="ucheck">Try again</button></div>`;
+      break;
+    default:
+      body = head('download', 'info', 'Checking for updates') + `<div class="progress"><div style="width:30%"></div></div><p class="note">${esc(u.text || 'Asking GitHub for the latest release...')}</p>`;
+  }
+  return `<button class="back" data-act="uclose">&larr; Back</button>` + body +
+    `<label class="check"><input type="checkbox" data-act="uauto" ${n.updateCheck ? 'checked' : ''}> Check for updates when DashLauncher starts (at most once a day)</label>`;
+}
+
 function render(n) {
   if (!n) { root.innerHTML = ''; return; }
   const name = n.title || n.name || 'This dashboard';
   let h = '';
+  current = n;
   switch (n.kind) {
+    case 'update':
+      h = updateHtml(n);
+      break;
     case 'locked':
       h = head('lock', 'info', `${name} is open in its own window`) +
         `<p>A dashboard can only run in one place at a time. Switch to its window, or close it and try again here.</p>
@@ -89,9 +155,10 @@ function render(n) {
 root.addEventListener('click', async (e) => {
   const b = e.target.closest('[data-act]');
   if (!b) return;
+  if (b.dataset.act === 'uauto') { bridge.request('update.auto', { on: b.checked }).catch(() => {}); return; }   // let the box tick
   const id = root.dataset.id;
   e.preventDefault();
-  const cmd = { reload: 'tab.reload', close: 'tab.close', retry: 'tab.retry', approve: 'tab.approve', switch: 'tab.switchTo', download: 'catalog.download', page: 'catalog.download', folder: 'modules.open', refresh: 'modules.scan' }[b.dataset.act];
+  const cmd = { uclose: 'update.close', ucheck: 'update.check', ustage: 'update.stage', ucancel: 'update.cancel', uapply: 'update.apply', reload: 'tab.reload', close: 'tab.close', retry: 'tab.retry', approve: 'tab.approve', switch: 'tab.switchTo', download: 'catalog.download', page: 'catalog.download', folder: 'modules.open', refresh: 'modules.scan' }[b.dataset.act];
   b.disabled = true;
   try {
     const args = b.dataset.act === 'page' ? { id, page: true } : { id };
@@ -113,6 +180,7 @@ root.addEventListener('click', async (e) => {
 });
 
 bridge.on('notice', render);
+bridge.on('update', (u) => { if (current && current.kind === 'update') render({ ...current, update: u }); });
 bridge.on('theme', (d) => bridge.setTheme(d && d.theme));
 
 (async () => {

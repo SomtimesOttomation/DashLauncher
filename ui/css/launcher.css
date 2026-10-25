@@ -64,7 +64,10 @@ body.rail { background: var(--rail); overflow: hidden; user-select: none; }
 .rail-btn:disabled { opacity: .5; cursor: progress; }
 .rail-btn:hover { background: color-mix(in srgb, var(--surface) 70%, transparent); color: var(--text); border-color: var(--line); }
 .rail-btn.kill:hover { color: #fff; background: var(--live); border-color: var(--live); }
-.rail-ver { font-size: 10px; color: var(--muted); letter-spacing: .02em; }
+.rail-ver { position: relative; font-size: 10px; color: var(--muted); letter-spacing: .02em; background: none; border: 0; padding: 3px 6px; border-radius: 6px; }
+.rail-ver:hover, .rail-ver.open { color: var(--text); background: color-mix(in srgb, var(--surface) 70%, transparent); }
+.rail-ver.has-update { color: var(--accent2); font-weight: 700; }
+.rail-ver.has-update::after { content: ""; position: absolute; top: 1px; right: 0; width: 6px; height: 6px; border-radius: 50%; background: var(--accent2); }
 
 /* ------------------------------------------------------------ notice page */
 body.panel { background: var(--bg); display: grid; place-items: center; padding: 32px; overflow: auto; }
@@ -86,6 +89,15 @@ body.panel { background: var(--bg); display: grid; place-items: center; padding:
 .btn.primary { background: var(--accent2); border-color: var(--accent2); color: var(--on-accent2); }
 .btn.primary:hover { filter: brightness(1.08); }
 .note { margin-top: 14px; font-size: 12.5px; color: var(--muted); }
+.back { background: none; border: 0; padding: 0; margin-bottom: 14px; color: var(--accent2); font-weight: 600; }
+.notes { margin-top: 14px; padding: 12px 14px; border-radius: 10px; background: var(--surface2); max-height: 260px; overflow: auto; font-size: 13px; }
+.notes h3 { font-size: 13px; margin: 10px 0 4px; }
+.notes h3:first-child { margin-top: 0; }
+.notes ul { margin: 0; padding-left: 18px; }
+.progress { height: 8px; border-radius: 999px; background: var(--surface2); overflow: hidden; margin-top: 16px; }
+.progress div { height: 100%; background: var(--accent2); transition: width .25s; }
+.check { display: flex; align-items: center; gap: 8px; margin-top: 18px; padding-top: 14px; border-top: 1px solid var(--line); font-size: 13px; color: var(--muted); }
+.check input { accent-color: var(--accent2); }
 .note a { color: var(--accent2); }
 .steps { margin: 16px 0 0; padding-left: 22px; display: grid; gap: 14px; color: var(--muted); }
 .steps li::marker { color: var(--text); font-weight: 600; }

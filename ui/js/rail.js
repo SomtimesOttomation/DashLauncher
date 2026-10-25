@@ -23,7 +23,8 @@ const killBtn = document.getElementById('btn-kill');
 const scanBtn = document.getElementById('btn-scan');
 const verEl = document.getElementById('ver');
 
-let state = { tabs: [], active: '', theme: 'system' };
+let state = { tabs: [], active: '', theme: 'system', launcherUpdate: '', overlay: '' };
+let version = '';
 
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
@@ -55,6 +56,10 @@ function render() {
     return `<button class="${cls}" type="button" data-id="${esc(t.id)}" title="${esc(tooltip(t))}" aria-label="${esc(t.name)}" ${t.id === state.active ? 'aria-current="page"' : ''}>
       <span class="tab-icon">${icon}${badges(t)}</span><span class="tab-name">${esc(t.name)}</span></button>`;
   }).join('');
+  verEl.textContent = version ? `v${version}` : '';
+  verEl.classList.toggle('has-update', !!state.launcherUpdate);
+  verEl.classList.toggle('open', state.overlay === 'update');
+  verEl.title = state.launcherUpdate ? `DashLauncher v${state.launcherUpdate} is available` : 'DashLauncher updates';
   themeBtn.innerHTML = ICON[state.theme] || ICON.system;
   themeBtn.title = THEME_LABEL[state.theme] || THEME_LABEL.system;
   bridge.setTheme(state.theme);
@@ -91,11 +96,12 @@ killBtn.addEventListener('click', async () => {
 });
 
 bridge.on('tabs', (d) => { state = { ...state, ...d }; render(); });
+verEl.addEventListener('click', () => bridge.request('update.open').catch((err) => console.warn(err.message)));
 
 (async () => {
   try {
     const info = await bridge.request('rail.init');
-    verEl.textContent = info.version ? `v${info.version}` : '';
+    version = info.version || '';
     state.theme = info.theme || 'system';
     render();
   } catch (err) { console.warn(err.message); }

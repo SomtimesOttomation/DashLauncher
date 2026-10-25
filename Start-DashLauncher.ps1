@@ -76,7 +76,7 @@ $script:ModulesDir = Join-Path $Root 'modules'
 if (-not (Test-Path $script:ModulesDir)) { New-Item -ItemType Directory -Path $script:ModulesDir -Force | Out-Null }
 $script:Settings = [pscustomobject]@{
     settingsVersion = 2; scanFolders = @($script:ModulesDir); approved = @(); declined = @(); order = @(); lastTab = ''; theme = 'system'; bounds = $null
-    catalogCheck = $true
+    catalogCheck = $true; updateCheck = $true
 }
 if (Test-Path $script:SettingsPath) {
     try {
@@ -88,6 +88,7 @@ if (Test-Path $script:SettingsPath) {
         if (@('system', 'light', 'dark') -contains [string]$loaded.theme) { $script:Settings.theme = [string]$loaded.theme }
         if ($loaded.bounds) { $script:Settings.bounds = $loaded.bounds }
         if ($loaded.catalogCheck -is [bool]) { $script:Settings.catalogCheck = $loaded.catalogCheck }
+        if ($loaded.updateCheck -is [bool]) { $script:Settings.updateCheck = $loaded.updateCheck }
     } catch { }
 }
 function Save-Settings {
@@ -149,6 +150,132 @@ function Complete-CatalogCheck {
     $script:CatalogCache.ok = $allOk
     try { [IO.File]::WriteAllText($script:CatalogCachePath, (ConvertTo-Json -InputObject $script:CatalogCache -Depth 6), $script:Utf8) } catch { }
     [void](Invoke-Rescan)
+}
+
+# ---------------------------------------------------------------- launcher updates (child process, like NBADash's)
+# Update-DashLauncher.ps1 checks GitHub and downloads + verifies a release into the update folder; Apply-Update.ps1
+# swaps the files after the launcher closes, relaunches it, and rolls back if the new version does not confirm.
+# Neither ever touches the modules folder.
+$script:UpdDir = Join-Path $script:DataDir 'update'
+if (-not (Test-Path $script:UpdDir)) { New-Item -ItemType Directory -Path $script:UpdDir -Force | Out-Null }
+$script:UpdProc = $null
+$script:UpdAction = ''
+$script:UpdOut = Join-Path $script:UpdDir 'update.out'
+$script:UpdResultPath = Join-Path $script:UpdDir 'update-result.json'
+$script:Upd = @{ status = 'idle'; current = $Version; latest = ''; notes = ''; published = ''; htmlUrl = ''; error = ''; pct = 0; text = ''; installable = $false }
+function Read-UpdateJson {
+    param([string]$Name)
+    $p = Join-Path $script:UpdDir $Name
+    if (Test-Path $p) { try { return (Get-Content $p -Raw | ConvertFrom-Json) } catch { } }
+    return $null
+}
+function Set-UpdateFromResult {
+    param($R)
+    if (-not $R) { return }
+    $script:Upd.status = [string]$R.status
+    foreach ($k in 'latest', 'notes', 'published', 'htmlUrl', 'error') { $script:Upd[$k] = [string]$R.$k }
+    $script:Upd.installable = [bool]$R.installable
+    if ($script:Upd.status -eq 'staged') { $script:Upd.installable = $true }
+}
+# the last answer, so the rail can show "update available" before any new check
+$prev = Read-UpdateJson 'update-result.json'
+if ($prev -and [string]$prev.status -eq 'available' -and [string]$prev.current -eq $Version) { Set-UpdateFromResult $prev }
+$staged = Read-UpdateJson 'staged.json'
+if ($staged -and [string]$staged.from -eq $Version -and (Test-Path (Join-Path $script:UpdDir 'stage\Start-DashLauncher.ps1'))) { $script:Upd.status = 'staged'; $script:Upd.latest = [string]$staged.version; $script:Upd.installable = $true }
+
+function Start-Updater {
+    param([ValidateSet('Check', 'Stage')][string]$Action)
+    if ($script:UpdProc -and -not $script:UpdProc.HasExited) { return $false }
+    $cur = if ($env:DASHLAUNCHER_FAKE_VERSION) { $env:DASHLAUNCHER_FAKE_VERSION } else { $Version }     # test hook
+    Remove-Item $script:UpdResultPath -Force -ErrorAction SilentlyContinue
+    $argsList = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', ('"{0}"' -f (Join-Path $Root 'Update-DashLauncher.ps1')),
+                  '-Action', $Action, '-CurrentVersion', $cur, '-WorkDir', ('"{0}"' -f $script:UpdDir))
+    if ($env:DASHLAUNCHER_UPDATE_API) { $argsList += @('-ApiBase', $env:DASHLAUNCHER_UPDATE_API) }      # test hook
+    $script:UpdAction = $Action
+    $script:UpdProc = Start-Process -FilePath 'powershell.exe' -ArgumentList $argsList -WindowStyle Hidden -PassThru -RedirectStandardOutput $script:UpdOut
+    $script:Upd.status = $(if ($Action -eq 'Check') { 'checking' } else { 'downloading' })
+    $script:Upd.pct = 0; $script:Upd.text = 'Starting...'; $script:Upd.error = ''
+    Send-UpdateState
+    return $true
+}
+function Get-UpdaterProgress {
+    $r = @{ pct = 0; text = '' }
+    try {
+        $fs = [IO.File]::Open($script:UpdOut, 'Open', 'Read', 'ReadWrite')
+        $sr = New-Object IO.StreamReader($fs)
+        while (($l = $sr.ReadLine()) -ne $null) { if ($l -match '^##PROGRESS (\d+)\|(.*)$') { $r.pct = [int]$Matches[1]; $r.text = $Matches[2] } }
+        $sr.Close()
+    } catch { }
+    return $r
+}
+$script:LastUpdJson = ''
+function Send-UpdateState {
+    $json = ConvertTo-Json -InputObject @{ event = 'update'; data = $script:Upd } -Depth 4 -Compress
+    if ($json -ne $script:LastUpdJson) { $script:LastUpdJson = $json; Send-View $panelView $json; Push-RailState }
+}
+function Watch-Updater {
+    # from the timer: progress while it runs, the result once it ends
+    if (-not $script:UpdProc) { return }
+    if (-not $script:UpdProc.HasExited) {
+        $p = Get-UpdaterProgress
+        $script:Upd.pct = $p.pct; $script:Upd.text = $p.text
+        Send-UpdateState
+        return
+    }
+    $script:UpdProc = $null
+    $res = Read-UpdateJson 'update-result.json'
+    if (-not $res) { $res = [pscustomobject]@{ status = 'error'; error = 'The update check ended without an answer.' } }
+    $was = $script:Upd.status
+    Set-UpdateFromResult $res
+    Send-UpdateState
+    if ($script:Upd.status -eq 'available' -and $was -eq 'checking' -and -not $script:PanelOverride) { Show-Toast ("DashLauncher v{0} is available. Click the version at the bottom of the tab rail." -f $script:Upd.latest) }
+}
+function Start-UpdateCheckIfDue {
+    # at start: at most once a day, and only if the person has not turned it off
+    if (-not $script:Settings.updateCheck) { return }
+    if (@('staged', 'available') -contains $script:Upd.status) { return }
+    $last = $null
+    if ($prev -and $prev.checkedAt) { try { $last = [datetime]::Parse([string]$prev.checkedAt, [Globalization.CultureInfo]::InvariantCulture) } catch { } }
+    if ($last -and ((Get-Date) - $last).TotalHours -lt 24 -and [string]$prev.status -ne 'error') { return }
+    [void](Start-Updater 'Check')
+}
+function Install-StagedUpdate {
+    $st = Read-UpdateJson 'staged.json'
+    $stage = Join-Path $script:UpdDir 'stage'
+    if (-not $st -or -not (Test-Path (Join-Path $stage 'Start-DashLauncher.ps1'))) { return 'There is no downloaded update to install. Download it again.' }
+    # run the helper from a copy, so replacing the launcher's files cannot touch the running helper
+    $runDir = Join-Path $script:UpdDir 'run'
+    if (-not (Test-Path $runDir)) { New-Item -ItemType Directory -Path $runDir -Force | Out-Null }
+    $helper = Join-Path $runDir 'Apply-Update.ps1'
+    Copy-Item (Join-Path $Root 'Apply-Update.ps1') $helper -Force
+    $relaunch = '"' + (Join-Path $Root 'Start-DashLauncher.bat') + '"'
+    $b64 = [Convert]::ToBase64String($script:Utf8.GetBytes($relaunch))
+    $h = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', ('"{0}"' -f $helper), '-AppDir', ('"{0}"' -f $Root), '-StageDir', ('"{0}"' -f $stage),
+           '-WorkDir', ('"{0}"' -f $script:UpdDir), '-ParentPid', [string]$PID, '-OldVersion', $Version, '-NewVersion', [string]$st.version, '-RelaunchB64', $b64)
+    Start-Process -FilePath 'powershell.exe' -ArgumentList $h -WindowStyle Hidden | Out-Null
+    return ''
+}
+# After an update: report the result once, and tell the helper this start worked (once the rail has loaded).
+$script:UpdateNote = $null
+$pend = Read-UpdateJson 'update-pending.json'
+if ($pend -and [string]$pend.to -eq $Version) { $script:UpdateNote = @{ ok = $true; from = [string]$pend.from; to = [string]$pend.to } }
+$failed = Read-UpdateJson 'update-failed.json'
+if ($failed) {
+    $script:UpdateNote = @{ ok = $false; from = [string]$failed.from; to = [string]$failed.to; reason = [string]$failed.reason }
+    Remove-Item (Join-Path $script:UpdDir 'update-failed.json'), (Join-Path $script:UpdDir 'update-pending.json') -Force -ErrorAction SilentlyContinue
+}
+function Confirm-UpdateStarted {
+    $n = $script:UpdateNote
+    if (-not $n) { return }
+    $script:UpdateNote = $null
+    if ($n.ok) {
+        try { [IO.File]::WriteAllText((Join-Path $script:UpdDir 'update-ok.json'), '{"ok":true}', $script:Utf8) } catch { }
+        Remove-Item (Join-Path $script:UpdDir 'update-pending.json') -Force -ErrorAction SilentlyContinue
+        $script:Upd.status = 'current'
+        Show-Toast ("DashLauncher was updated to v{0}." -f $n.to)
+    } else {
+        Show-Toast ("The update to v{0} did not work, so DashLauncher is back on v{1}. {2}" -f $n.to, $n.from, $n.reason)
+    }
 }
 
 # ---------------------------------------------------------------- tabs
@@ -356,14 +483,17 @@ function Send-Event {
 }
 $script:LastRailJson = ''
 function Push-RailState {
-    $obj = @{ tabs = @($script:Tabs | ForEach-Object { ConvertTo-TabJson $_ }); active = $script:Active; theme = $script:Settings.theme }
+    $upd = $(if (@('available', 'staged', 'downloading') -contains $script:Upd.status) { $script:Upd.latest } else { '' })
+    $obj = @{ tabs = @($script:Tabs | ForEach-Object { ConvertTo-TabJson $_ }); active = $script:Active; theme = $script:Settings.theme; launcherUpdate = $upd; overlay = [string]$script:PanelOverride }
     $json = ConvertTo-Json -InputObject @{ event = 'tabs'; data = $obj } -Depth 8 -Compress
     if ($json -ne $script:LastRailJson) { $script:LastRailJson = $json; Send-View $rail $json }
 }
 
 # ---------------------------------------------------------------- notices (locked, error, broken, declined, empty)
 $script:Notice = $null
+$script:PanelOverride = ''
 function Get-Notice {
+    if ($script:PanelOverride -eq 'update') { return @{ kind = 'update'; update = $script:Upd; updateCheck = [bool]$script:Settings.updateCheck } }
     $t = $script:ById[$script:Active]
     if (-not $t) {
         $sample = Join-Path $Root 'samples\SampleDash'
@@ -576,6 +706,7 @@ function Complete-DashView {
 
 function Select-Tab {
     param([string]$Id)
+    $script:PanelOverride = ''
     $next = $script:ById[$Id]
     if (-not $next) { return }
     $cur = $script:ById[$script:Active]
@@ -712,6 +843,39 @@ function Invoke-LauncherCommand {
             $script:LastRailJson = ''
             & $reply (ConvertTo-Json -InputObject @{ version = $Version; theme = $script:Settings.theme; debug = [bool]$Debug } -Compress)
             Push-RailState
+            Confirm-UpdateStarted                     # the launcher has loaded: an update just installed can be kept
+        }
+        'update.open' {
+            & $reply 'true'
+            $script:PanelOverride = 'update'
+            $form.Text = $AppName
+            Show-Notice
+            Push-RailState
+            if (@('idle', 'error', 'none') -contains $script:Upd.status) { [void](Start-Updater 'Check') }
+        }
+        'update.close' {
+            & $reply 'true'
+            $back = $script:Active
+            $script:PanelOverride = ''
+            $script:Active = ''
+            if ($back -and $script:ById.ContainsKey($back)) { Select-Tab $back } else { Show-Notice; Push-RailState }
+        }
+        'update.check' { & $reply ((Start-Updater 'Check').ToString().ToLower()) }
+        'update.stage' { & $reply ((Start-Updater 'Stage').ToString().ToLower()) }
+        'update.cancel' {
+            try { if ($script:UpdProc -and -not $script:UpdProc.HasExited) { $script:UpdProc.Kill() } } catch { }
+            & $reply 'true'
+        }
+        'update.apply' {
+            $err = Install-StagedUpdate
+            if ($err) { & $fail $err; return }
+            & $reply 'true'
+            $form.Close()                              # the helper waits for this process to end, then swaps the files
+        }
+        'update.auto' {
+            $script:Settings.updateCheck = [bool]$a.on
+            Save-Settings
+            & $reply 'true'
         }
         'panel.get' { & $reply (ConvertTo-Json -InputObject @{ notice = (Get-Notice); theme = $script:Settings.theme } -Depth 6 -Compress) }
         'tab.select' {
@@ -849,6 +1013,7 @@ $timer.add_Tick({
     }
     if ($script:Tick % 8 -eq 0) { Test-RunningModules; Push-RailState }
     if ($script:CatalogJob -and $script:CatalogJob.Handle.IsCompleted) { Complete-CatalogCheck }
+    if ($script:UpdProc) { Watch-Updater }
 })
 
 # ---------------------------------------------------------------- start and close
@@ -865,11 +1030,13 @@ $form.add_Shown({
     if ($first) { Select-Tab $first } else { Show-Notice }
     $timer.Start()
     Start-CatalogCheck -MinMinutes 60
+    Start-UpdateCheckIfDue
 })
 
 $form.add_FormClosing({
     $timer.Stop()
     if ($script:CatalogJob) { try { $script:CatalogJob.Ps.Stop(); $script:CatalogJob.Ps.Dispose() } catch { } }
+    try { if ($script:UpdProc -and -not $script:UpdProc.HasExited) { $script:UpdProc.Kill() } } catch { }
     foreach ($t in @($script:Tabs)) {
         if ($t.Init) { try { Invoke-DashFn $t 'Stop-Dash' | Out-Null } catch { } }
     }

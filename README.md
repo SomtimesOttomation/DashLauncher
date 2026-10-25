@@ -33,6 +33,14 @@ offers to switch to that window.
 
 `Start-DashLauncher.bat -Debug` turns on DevTools in every view.
 
+## Updates
+
+The version number at the bottom of the tab rail opens the update page. DashLauncher checks GitHub for a newer release
+when it starts, at most once a day (a box on that page turns this off), and the version gets a dot when one is out.
+Updating downloads the release zip, checks it against its published checksum, then closes DashLauncher, swaps its own
+files and reopens it. If the new version does not start, the old one is restored. Updates never touch the `modules`
+folder, `lib\` or your settings; each dashboard module keeps its own updater.
+
 ## Sample module
 
 `samples\SampleDash` is a dashboard module that contacts nothing. Copy it into `modules` to try the launcher offline:
@@ -51,8 +59,8 @@ fetching anything. Close the dashboard first. `tests\Test-Manifest.ps1` checks t
 | 0 | The dash contract and manifest schema | this repo (done) |
 | 1 | NBADash split into a backend module and a thin host, with no visible change | [NBADash](https://github.com/SomtimesOttomation/NBADash) (done) |
 | 2 | Launcher v0.1: window, tab rail, NBA tab, first-run approval | this repo (done) |
-| 3 | Launcher v0.2: a no-network Sample dash, tab badges, keyboard switching | this repo (in testing) |
-| 4 | Launcher v0.3: updater and release workflow (never touches `modules`) | this repo |
+| 3 | Launcher v0.2: a no-network Sample dash, tab badges, keyboard switching | this repo (done) |
+| 4 | Launcher updater and release workflow (never touches `modules`) | this repo (in testing) |
 | 5 | v1.0: more sports plug in through their own `dash.json` | each sport's repo |
 
 ## How a dashboard plugs in
