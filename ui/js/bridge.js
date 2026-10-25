@@ -61,3 +61,13 @@ export async function request(cmd, args = {}, timeoutMs = 30000) {
 export function setTheme(theme) {
   document.documentElement.dataset.theme = theme || 'system';
 }
+
+// Ctrl+1..9 jumps to a tab and Ctrl+Tab / Ctrl+Shift+Tab cycles, the same as inside a dashboard.
+window.addEventListener('keydown', (e) => {
+  if (!e.ctrlKey || e.altKey || e.metaKey) return;
+  const m = /^(?:Digit|Numpad)([1-9])$/.exec(e.code);
+  const key = m ? m[1] : (e.key === 'Tab' ? 'Tab' : '');
+  if (!key) return;
+  e.preventDefault();
+  request('key', { key, shift: e.shiftKey }).catch(() => {});
+}, true);

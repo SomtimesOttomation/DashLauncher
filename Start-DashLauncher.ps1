@@ -365,7 +365,10 @@ function Push-RailState {
 $script:Notice = $null
 function Get-Notice {
     $t = $script:ById[$script:Active]
-    if (-not $t) { return @{ kind = 'empty'; modulesDir = $script:ModulesDir; scanFolders = @($script:Settings.scanFolders) } }
+    if (-not $t) {
+        $sample = Join-Path $Root 'samples\SampleDash'
+        return @{ kind = 'empty'; modulesDir = $script:ModulesDir; scanFolders = @($script:Settings.scanFolders); sampleDir = $(if (Test-Path $sample) { $sample } else { '' }) }
+    }
     if ($t.State -eq 'available') {
         $repoName = ($t.Catalog.Repo -split '/')[1]
         return @{
@@ -391,6 +394,40 @@ function Show-Notice {
 }
 
 # ---------------------------------------------------------------- dash lifecycle
+# ---------------------------------------------------------------- keyboard: Ctrl+1..9 jump to a tab, Ctrl+Tab cycles
+# Keys typed in a dashboard go to its WebView2, not to this window, so after each page loads the launcher adds this
+# listener. It sends launcher.* messages, which the launcher handles itself and never passes to the dash.
+$script:KeyScript = @'
+(() => {
+  if (window.__dashLauncherKeys) return;
+  window.__dashLauncherKeys = true;
+  window.addEventListener('keydown', (e) => {
+    if (!e.ctrlKey || e.altKey || e.metaKey) return;
+    const m = /^(?:Digit|Numpad)([1-9])$/.exec(e.code);
+    const key = m ? m[1] : (e.key === 'Tab' ? 'Tab' : '');
+    if (!key) return;
+    e.preventDefault(); e.stopPropagation();
+    window.chrome.webview.postMessage({ cmd: 'launcher.key', args: { key: key, shift: e.shiftKey } });
+  }, true);
+})();
+'@
+function Invoke-LauncherKey {
+    param($A)
+    $tabs = @($script:Tabs)
+    if (-not $tabs.Count) { return }
+    $key = [string]$A.key
+    $target = $null
+    if ($key -match '^[1-9]$') {
+        $i = [int]$key - 1
+        if ($i -lt $tabs.Count) { $target = $tabs[$i] }
+    } elseif ($key -eq 'Tab') {
+        $cur = [array]::IndexOf(@($tabs | ForEach-Object { $_.Id }), $script:Active)
+        $step = if ($A.shift) { -1 } else { 1 }
+        $target = $tabs[(($cur + $step) % $tabs.Count + $tabs.Count) % $tabs.Count]
+    }
+    if ($target -and $target.Id -ne $script:Active) { Select-Tab $target.Id }
+}
+
 function Invoke-DashFn {
     # Calls a backend function through its own module object, never by bare name: every dash exports the same names.
     param($Tab, [string]$Name, [hashtable]$Params = @{})
@@ -496,6 +533,10 @@ function New-DashView {
         if (-not $tab -or $tab.State -ne 'ready' -or -not [object]::ReferenceEquals($tab.WebView, $s)) { return }
         $msg = $null
         try { $msg = $a.WebMessageAsJson | ConvertFrom-Json } catch { return }
+        if ($msg.cmd -is [string] -and $msg.cmd.StartsWith('launcher.')) {
+            if ($msg.cmd -eq 'launcher.key') { try { Invoke-LauncherKey $msg.args } catch { } }
+            return
+        }
         try { Invoke-DashFn $tab 'Invoke-DashCommand' @{ Message = $msg } | Out-Null } catch { }
     })
     $wv.add_NavigationStarting({
@@ -505,6 +546,7 @@ function New-DashView {
     $wv.add_NavigationCompleted({
         param($s, $a)
         Send-Event $s 'host.theme' @{ theme = $script:Settings.theme }
+        try { [void]$s.CoreWebView2.ExecuteScriptAsync($script:KeyScript) } catch { }
     })
     $Tab.WebView = $wv
     [void]$wv.EnsureCoreWebView2Async($null)
@@ -753,6 +795,7 @@ function Invoke-LauncherCommand {
         'modules.open' {
             try { Start-Process -FilePath 'explorer.exe' -ArgumentList ('"{0}"' -f $script:ModulesDir); & $reply 'true' } catch { & $fail $_.Exception.Message }
         }
+        'key' { & $reply 'true'; Invoke-LauncherKey $a }
         'traffic.stop' {
             # WebView2 must not run a modal dialog inside its own event: ask just after this handler returns
             if ($script:PendingStop) { & $reply '0'; return }

@@ -170,6 +170,13 @@ The host builds this before `Initialize-Dash` and keeps it for the dash's lifeti
 `Post` may only be called on the UI thread, which is where `Invoke-DashCommand` and `Receive-DashEvents` run. The
 worker runspace never calls it; it queues messages for `Receive-DashEvents` instead.
 
+## Reserved for the launcher
+
+- Messages whose `cmd` starts with `launcher.` are the launcher's own. In launcher mode it handles them and never passes
+  them to `Invoke-DashCommand`, so a dash must not use that prefix for its own commands.
+- Ctrl+1 to Ctrl+9, Ctrl+Tab and Ctrl+Shift+Tab switch tabs. After each page load the launcher adds a small key
+  listener to the dash page that sends `launcher.key` messages, so a dash should not use those shortcuts itself.
+
 ## Host events
 
 The host also pushes these to the page. A page that ignores them still works.
@@ -228,6 +235,8 @@ required one raises it, and the launcher keeps supporting the previous number fo
 
 ## Checklist for a new dash
 
+`samples\SampleDash` in the DashLauncher repo is a complete, no-network example to copy.
+
 - [ ] `dash.json` passes `schema/dash.schema.json`, and every path exists inside the folder.
 - [ ] The backend exports the eight required functions; nothing in it creates a window or loads WebView2.
 - [ ] The standalone `.bat` works with DashLauncher absent.
@@ -237,4 +246,5 @@ required one raises it, and the launcher keeps supporting the previous number fo
 - [ ] Its release zip has `dash.json` at the root; extracted into DashLauncher's `modules` folder, it appears as a tab after Scan for modules.
 - [ ] Every data source is listed in `dataSources`, and its terms have been read.
 - [ ] Helper module names are unique to the dash (for example `Nba.Data`, not `Data`).
+- [ ] No `launcher.*` commands of its own, and no Ctrl+1 to Ctrl+9 or Ctrl+Tab shortcuts.
 - [ ] Scripts are ASCII-only (Windows PowerShell 5.1 misreads other characters).

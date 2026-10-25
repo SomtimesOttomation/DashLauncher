@@ -1,0 +1,40 @@
+# Sample Dash
+
+A small dashboard module that contacts nothing. It has two jobs:
+
+1. **Try DashLauncher without a real dashboard.** It can pretend there are live games, an update or a problem, and run a
+   fake 8-second sync, so every tab badge, the stop button, the theme and tab switching can be tested offline.
+2. **Start a new dashboard.** It is the smallest complete example of the dash contract
+   ([DASH-CONTRACT.md](../../DASH-CONTRACT.md)). Copy the folder, rename it, and replace the fake parts.
+
+## Try it in DashLauncher
+
+1. Copy the `SampleDash` folder into DashLauncher's `modules` folder.
+2. Press **Scan for modules** at the bottom of the tab rail (or restart DashLauncher).
+3. It isn't in the launcher's list of known modules, so DashLauncher asks before adding it. Say yes.
+
+## Run it on its own
+
+Double-click `Start-SampleDash.bat`. The first run downloads the WebView2 files into `lib\`, as NBADash does.
+
+## What is in it
+
+| File | What it is |
+| --- | --- |
+| `dash.json` | The manifest DashLauncher reads: id `sample`, name, title, paths. |
+| `modules\Sample.Host.psm1` | The backend: the eight contract functions plus the optional `Invoke-DashSync`. |
+| `Start-SampleDash.ps1` / `.bat` | The thin standalone host: window, WebView2, context, timer. |
+| `ui\` | The page: `index.html`, `app.css`, `app.js`, and `bridge.js` for talking to the host. |
+
+## Starting a new dashboard from it
+
+1. Copy the folder and rename it, for example `F1Dash`.
+2. In `dash.json`, set a new `id` (lowercase, for example `f1dash`), `name`, `title`, and list every data source and its
+   terms in `dataSources`.
+3. Rename `modules\Sample.Host.psm1` (for example `F1Dash.Host.psm1`) and point `backend` at it. Any helper module you
+   add needs a name unique to your dash.
+4. In the backend and `Start-SampleDash.ps1`, replace `sample` in the lock name (`Local\DashHost-sample`), the host names
+   (`sample.ui`, `sample.cache`) and the `SampleDash` data folders with your id and name.
+5. Replace the fake ticks and sync with real fetching, in a worker runspace or child process as NBADash does, and keep
+   the rules: nothing fetched until the person asks, automatic refresh opt-in, a hidden tab fetches nothing on a timer.
+6. Check it with `tools\Test-DashContract.ps1 -Path <your folder>` from the DashLauncher repo.

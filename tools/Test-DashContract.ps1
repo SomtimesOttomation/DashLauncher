@@ -30,7 +30,7 @@ Write-Host "Dash contract check: $folder"
 $info = Read-DashManifest -Folder $folder
 if (-not $info.Ok) { Fail "dash.json: $($info.Reason)"; exit 1 }
 Pass ("dash.json: {0} ({1}) v{2}, contract {3}" -f $info.Title, $info.Id, $info.Version, $info.Contract)
-if (-not @($info.DataSources).Count) { Note 'dash.json lists no dataSources. List every third-party source and its terms.' }
+if (-not @($info.DataSources).Count) { Note 'dash.json lists no dataSources. Fine for a dash that contacts nothing; otherwise list every third-party source and its terms.' }
 
 # 2. backend exports
 $required = @('Initialize-Dash', 'Start-DashWorker', 'Suspend-DashWorker', 'Invoke-DashCommand', 'Receive-DashEvents', 'Get-DashStatus', 'Stop-DashTraffic', 'Stop-Dash')

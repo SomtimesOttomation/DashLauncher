@@ -15,9 +15,12 @@ Changes are grouped by label: Feature, Bug/Fix, Redesign, Housekeeping. Every me
 - One theme for the launcher and every dashboard: follows Windows, light or dark.
 - Stop button that stops all traffic to every dashboard's data sources after you confirm; update checks keep working. Each dashboard resumes only from inside itself.
 - Reopens on the right tab after a dashboard update (`-Open`).
+- Ctrl+1 to Ctrl+9 jump to a tab; Ctrl+Tab and Ctrl+Shift+Tab move to the next or previous tab, even inside a dashboard.
+- Sample module (`samples\SampleDash`): contacts nothing, pretends live games, updates, problems and a sync to test the launcher offline, and is the template for new dashboards.
 
 **Housekeeping**
 - Dash contract version 1 (DASH-CONTRACT.md) and the dash.json schema.
 - Contract notes: backends are called through their own module, helper module names must be unique, unknown dash.json fields are ignored.
+- Contract: `launcher.*` commands and the tab-switching shortcuts are reserved for the launcher.
 - `tools\Test-DashContract.ps1` checks a dashboard against the contract; `tests\Test-Manifest.ps1` checks the dash.json rules.
 - README, license and changelog.

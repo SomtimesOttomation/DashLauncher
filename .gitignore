@@ -10,3 +10,5 @@ Thumbs.db
 # dashboard modules are installed by the person, not part of this repo
 modules/*
 !modules/README.md
+# the Sample's WebView2 DLLs when run on its own
+samples/*/lib/

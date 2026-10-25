@@ -77,6 +77,7 @@ function render(n) {
     NBADash\\      (has a dash.json)
     F1Dash\\</pre>
          <div class="actions"><button class="btn" data-act="folder">Open the modules folder</button><button class="btn primary" data-act="refresh">Refresh</button></div>
+         ${n.sampleDir ? `<p class="note">To try DashLauncher without a real dashboard, copy the Sample module into the modules folder:<span class="path">${esc(n.sampleDir)}</span></p>` : ''}
          <p class="note">DashLauncher also looks for modules every time it starts.</p>`;
     }
   }

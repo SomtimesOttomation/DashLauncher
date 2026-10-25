@@ -25,10 +25,19 @@ Windows PowerShell 5.1 + WebView2. No installer, no admin rights, no build step.
    - **Theme**: follows Windows, light or dark, for the launcher and every dashboard.
    - **Stop**: stops all traffic to every dashboard's data sources after you confirm. Update checks keep working.
 
+   Ctrl+1 to Ctrl+9 jump to a tab, and Ctrl+Tab / Ctrl+Shift+Tab move to the next or previous one, even while you are
+   working inside a dashboard.
+
 A dashboard can run in one place at a time. If NBADash is already open in its own window, the NBA tab says so and
 offers to switch to that window.
 
 `Start-DashLauncher.bat -Debug` turns on DevTools in every view.
+
+## Sample module
+
+`samples\SampleDash` is a dashboard module that contacts nothing. Copy it into `modules` to try the launcher offline:
+it can pretend there are live games, an update or a problem, and run a fake sync, so every badge, the stop button and
+tab switching can be tested. It is also the starting point for a new dashboard; see its README.
 
 ## Checking a dashboard
 
@@ -41,8 +50,8 @@ fetching anything. Close the dashboard first. `tests\Test-Manifest.ps1` checks t
 | --- | --- | --- |
 | 0 | The dash contract and manifest schema | this repo (done) |
 | 1 | NBADash split into a backend module and a thin host, with no visible change | [NBADash](https://github.com/SomtimesOttomation/NBADash) (done) |
-| 2 | Launcher v0.1: window, tab rail, NBA tab, first-run approval | this repo (in testing) |
-| 3 | Launcher v0.2: a no-network Sample dash, tab badges, keyboard switching | this repo |
+| 2 | Launcher v0.1: window, tab rail, NBA tab, first-run approval | this repo (done) |
+| 3 | Launcher v0.2: a no-network Sample dash, tab badges, keyboard switching | this repo (in testing) |
 | 4 | Launcher v0.3: updater and release workflow (never touches `modules`) | this repo |
 | 5 | v1.0: more sports plug in through their own `dash.json` | each sport's repo |
 
