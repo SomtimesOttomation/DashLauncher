@@ -4,6 +4,9 @@ Changes are grouped by label: Feature, Bug/Fix, Redesign, Housekeeping. Every me
 
 ## Unreleased
 
+**Bug/Fix**
+- A moved or second copy of DashLauncher now always looks in its own modules folder, not the first copy's.
+
 **Housekeeping**
 - README: moving an installed dashboard into `modules` means turning its nightly sync off and on again.
 - Contract: `Context.Relaunch` is spelled out as a full command line.

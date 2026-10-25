@@ -81,8 +81,8 @@ $script:Settings = [pscustomobject]@{
 if (Test-Path $script:SettingsPath) {
     try {
         $loaded = Get-Content $script:SettingsPath -Raw | ConvertFrom-Json
-        # version 1 scanned the folder next to DashLauncher; from version 2 dashboards live in DashLauncher\modules
-        if ([int]$loaded.settingsVersion -ge 2 -and $loaded.scanFolders) { $script:Settings.scanFolders = @($loaded.scanFolders | Where-Object { $_ -is [string] -and $_ }) }
+        # scanFolders is never read back: it is always this copy's own modules folder, so a moved or second copy of
+        # DashLauncher (they share these settings) never scans another copy's modules
         foreach ($k in 'approved', 'declined', 'order') { if ($null -ne $loaded.$k) { $script:Settings.$k = @($loaded.$k | Where-Object { $_ -is [string] }) } }
         if ($loaded.lastTab -is [string]) { $script:Settings.lastTab = $loaded.lastTab }
         if (@('system', 'light', 'dark') -contains [string]$loaded.theme) { $script:Settings.theme = [string]$loaded.theme }
@@ -92,7 +92,8 @@ if (Test-Path $script:SettingsPath) {
     } catch { }
 }
 function Save-Settings {
-    try { [IO.File]::WriteAllText($script:SettingsPath, ($script:Settings | ConvertTo-Json -Depth 5), $script:Utf8) } catch { }
+    $keep = $script:Settings | Select-Object -Property * -ExcludeProperty scanFolders
+    try { [IO.File]::WriteAllText($script:SettingsPath, ($keep | ConvertTo-Json -Depth 5), $script:Utf8) } catch { }
 }
 # A dash is approved by id and folder together, so a different folder claiming the same id asks again.
 function Get-ApprovalKey { param($Info) return ('{0}|{1}' -f $Info.Id, $Info.Folder.ToLowerInvariant()) }
