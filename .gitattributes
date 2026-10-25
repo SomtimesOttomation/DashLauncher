@@ -3,3 +3,6 @@
 .gitignore export-ignore
 .gitattributes export-ignore
 lib export-ignore
+tests export-ignore
+ui/dev export-ignore
+modules export-ignore

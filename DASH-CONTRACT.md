@@ -1,7 +1,7 @@
 # Dash contract (version 1)
 
 How a dashboard ("dash") plugs into DashLauncher while still running on its own.
-A dash that follows this document can be dropped next to DashLauncher and appears as a tab, with no launcher code changes.
+A dash that follows this document can be copied into DashLauncher's `modules` folder and appears as a tab, with no launcher code changes.
 
 Everything here targets Windows PowerShell 5.1 + WebView2, no installer, no admin rights, no build step.
 
@@ -15,17 +15,33 @@ through. The page code does not change: it keeps calling `bridge.request(cmd, ar
 ## Folder layout
 
 ```
-<any folder>\
-  DashLauncher\             the launcher
-  NBADash\                  a dash
-    dash.json               required, read by the launcher
-    Start-NBADash.bat       standalone entry point (thin host)
-    modules\NBADash.Host.psm1   the backend module named in dash.json
-    ui\                     the page, served as https://<id>.ui/
+DashLauncher\
+  Start-DashLauncher.bat
+  core\                     the launcher's own PowerShell module
+  modules\                  dashboard modules, one folder each
+    NBADash\                a dash
+      dash.json             required, read by the launcher
+      Start-NBADash.bat     standalone entry point (thin host)
+      modules\NBADash.Host.psm1   the backend module named in dash.json
+      ui\                   the page, served as https://<id>.ui/
 ```
 
-The launcher scans the folders listed in its settings (default: its own parent folder) for `*\dash.json`, one level
-deep. It never loads a dash the person has not approved; the first time a new dash is found it asks first.
+The launcher looks one level deep in its `modules` folder for `*\dash.json` when it starts and when the person presses
+"Scan for modules" at the bottom of the tab rail. A dash listed in the launcher's `catalog.json` is trusted once the
+person installs it; any other dash is loaded only after the person approves it, and the launcher asks the first time it
+finds one. If a scan finds a running
+dash's folder (or its `dash.json`) gone, the launcher calls its `Stop-Dash` and removes its tab. Between scans, the launcher checks every 2 seconds
+that each running dash's `dash.json` still exists; if not, it calls `Suspend-DashWorker` and covers the dash with a
+notice offering Close or Reload. A dash still runs standalone
+from its own `.bat`, wherever its folder sits, including inside `modules`.
+
+## Getting listed in the launcher
+
+DashLauncher's `catalog.json` lists known dashes by id and GitHub repo. A listed dash that is not installed shows as a
+greyed tab once its repo has a published release (not a draft or pre-release) at or above the catalog's `minVersion`;
+its page links to the release zip and explains where to extract it. For that to work, the release zip must have
+`dash.json` at its root, so extracting it into `modules\<name>` gives a working dash. If GitHub cannot be reached, the
+last answer seen is used; `"published": true` in `catalog.json` shows a dash regardless, and `false` hides it.
 
 ## dash.json
 
@@ -63,7 +79,8 @@ deep. It never loads a dash the person has not approved; the first time a new da
 
 Every relative path must stay inside the dash folder: no `..`, no leading `\` or `/`, no drive letter, no UNC path, and
 the file or folder must exist. A manifest that breaks any rule is listed as broken with the reason, and none of its code
-is loaded. The machine-readable version of these rules is `schema/dash.schema.json`.
+is loaded. Fields the launcher does not know are ignored, so optional fields added later in contract 1 do not
+break older launchers. The machine-readable version of these rules is `schema/dash.schema.json`.
 
 ## Host names
 
@@ -89,9 +106,14 @@ dash's worker runspace or a child process, as NBADash already does.
 | `Invoke-DashCommand -Message $msg` | The page sends `{id, cmd, args}` | Validate every argument and answer through `Context.Post` with `{id, ok, data}` or `{id, ok:false, error}`. |
 | `Receive-DashEvents` | Every 250 ms while initialized | Return an array of JSON strings, each an `{event, data}` message for the page (worker output, sync and updater progress). Return at most 25 per call. |
 | `Get-DashStatus` | Every 2 seconds while initialized | Return the status hashtable below. No network, no disk scans. |
-| `Stop-DashTraffic` | The person presses the launcher's kill switch | Cancel running syncs, update downloads and queued requests, and pause the worker, visible tab included. Change no saved settings. Tell the page traffic was stopped; only the person resumes it, from inside the dash. |
+| `Stop-DashTraffic` | The person presses the launcher's kill switch | Stop all traffic to the dash's data sources: cancel running syncs and queued data requests, stop live refresh, and pause the worker, visible tab included. Update checks and downloads (GitHub) are not affected. Change no saved settings. Tell the page traffic was stopped; only the person resumes it, from inside the dash. |
 | `Stop-Dash` | The host is closing | Stop child processes and the worker, release the host lock, within 2 seconds. |
 | `Invoke-DashSync -Scope 'quick'` | Optional. The launcher's master sync runs (built but switched off for now; see below) | Start the dash's own quick sync and return `$true`, or `$false` if one is already running. Progress shows through `Get-DashStatus`. A dash without this function is skipped by the master sync. |
+
+Several dashes run in one launcher process, and every backend exports the same function names. So the launcher calls
+each backend through its own module object, never by bare name, and a backend must not rely on being imported into the
+global scope. Any helper module a backend imports must have a name unique to that dash (NBADash uses `Nba.Data`), because
+PowerShell keeps one module per name per process.
 
 ### Init result
 
@@ -125,8 +147,8 @@ counting.
 
 ## Kill switch
 
-The launcher has one button that stops all traffic happening right now: it calls `Stop-DashTraffic` on every
-initialized dash. There is no matching "start all". After a stop, each dash stays quiet until the person resumes it
+The launcher has one button that stops all traffic to data sources happening right now: it calls `Stop-DashTraffic`
+on every initialized dash. It is for the sports data sources only; update checks and downloads keep working. There is no matching "start all". After a stop, each dash stays quiet until the person resumes it
 inside that dash; switching tabs does not resume it.
 
 ## Context object
@@ -185,7 +207,8 @@ can confirm the new version started, exactly as it does standalone. If the dash 
 loads, nothing confirms and the dash's own updater rolls back.
 
 A dash confirms a new version when its page loads, not in `Initialize-Dash`: page load proves the backend and the UI
-both work. A dash never edits the launcher's files, and the launcher never edits a dash's files.
+both work. A dash never edits the launcher's files, and the launcher never edits a dash's files: the launcher's own updater
+leaves the `modules` folder alone.
 
 ## Fetching rules
 
@@ -210,6 +233,8 @@ required one raises it, and the launcher keeps supporting the previous number fo
 - [ ] The standalone `.bat` works with DashLauncher absent.
 - [ ] Opening the dash in the launcher while it is open standalone shows the locked message.
 - [ ] A hidden tab makes no timed requests.
-- [ ] After the kill switch, nothing fetches until the person resumes inside the dash.
+- [ ] After the kill switch, no data source is contacted until the person resumes inside the dash (update checks may still run).
+- [ ] Its release zip has `dash.json` at the root; extracted into DashLauncher's `modules` folder, it appears as a tab after Scan for modules.
 - [ ] Every data source is listed in `dataSources`, and its terms have been read.
+- [ ] Helper module names are unique to the dash (for example `Nba.Data`, not `Data`).
 - [ ] Scripts are ASCII-only (Windows PowerShell 5.1 misreads other characters).

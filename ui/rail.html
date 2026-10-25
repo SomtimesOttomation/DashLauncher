@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en" data-theme="system">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self'">
+  <title>DashLauncher tabs</title>
+  <link rel="stylesheet" href="css/launcher.css">
+</head>
+<body class="rail">
+  <div class="rail-wrap">
+    <nav id="tabs" class="tabs" aria-label="Dashboards"></nav>
+    <div class="rail-foot">
+      <button id="btn-scan" class="rail-btn" type="button" title="Scan for modules" aria-label="Scan for modules"></button>
+      <button id="btn-theme" class="rail-btn" type="button" aria-label="Theme"></button>
+      <button id="btn-kill" class="rail-btn kill" type="button" title="Stop all traffic to data sources (update checks keep working)" aria-label="Stop all data traffic"></button>
+      <span id="ver" class="rail-ver"></span>
+    </div>
+  </div>
+  <script type="module" src="js/rail.js"></script>
+</body>
+</html>

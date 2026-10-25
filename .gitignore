@@ -7,3 +7,6 @@ lib/*.dll
 .vscode/
 .DS_Store
 Thumbs.db
+# dashboard modules are installed by the person, not part of this repo
+modules/*
+!modules/README.md

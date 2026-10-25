@@ -1,0 +1,13 @@
+{
+  "about": "Dashboard modules DashLauncher knows about. One that is not installed shows as a greyed tab when its GitHub repo has a published release at or above minVersion. Set \"published\": true to show it anyway (for example when GitHub cannot be reached) or false to hide it.",
+  "modules": [
+    {
+      "id": "nbadash",
+      "name": "NBA",
+      "title": "NBA 2026-27",
+      "repo": "SomtimesOttomation/NBADash",
+      "minVersion": "0.12.0",
+      "icon": "ui/img/catalog/nbadash.svg"
+    }
+  ]
+}
