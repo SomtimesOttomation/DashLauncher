@@ -4,6 +4,10 @@ Changes are grouped by label: Feature, Bug/Fix, Redesign, Housekeeping. Every me
 
 ## Unreleased
 
+**Housekeeping**
+- README: moving an installed dashboard into `modules` means turning its nightly sync off and on again.
+- Contract: `Context.Relaunch` is spelled out as a full command line.
+
 ## Released
 
 ### v0.2.0

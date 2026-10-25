@@ -161,7 +161,7 @@ The host builds this before `Initialize-Dash` and keeps it for the dash's lifeti
 | `Root` | string | the dash folder | the dash folder |
 | `Post` | scriptblock `{ param([string]$Json) }` | posts to its own WebView2 | posts to that dash's WebView2 |
 | `Close` | scriptblock | closes its window | closes the whole launcher |
-| `Relaunch` | string | command line: the dash's `.bat` | command line: `Start-DashLauncher.bat -Open <id>` |
+| `Relaunch` | string | full command line: the dash's quoted `.bat` path | full command line, arguments included: `"<launcher folder>\Start-DashLauncher.bat" -Open <id>` |
 | `HostPid` | int | its own process id | the launcher's process id |
 | `Theme` | string | `''` (the dash uses its own setting) | `'light'`, `'dark'` or `'system'` |
 | `LauncherVersion` | string | `''` | the launcher's version |

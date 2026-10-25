@@ -28,6 +28,10 @@ Windows PowerShell 5.1 + WebView2. No installer, no admin rights, no build step.
    Ctrl+1 to Ctrl+9 jump to a tab, and Ctrl+Tab / Ctrl+Shift+Tab move to the next or previous one, even while you are
    working inside a dashboard.
 
+**Moving a dashboard you already use into `modules`:** if it set up a Windows scheduled task (NBADash's nightly sync
+does), that task still points at the old folder. Turn the nightly sync off and on again in that dashboard's Settings
+after the move.
+
 A dashboard can run in one place at a time. If NBADash is already open in its own window, the NBA tab says so and
 offers to switch to that window.
 
