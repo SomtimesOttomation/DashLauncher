@@ -8,11 +8,14 @@
     dashboard's worker runs; hidden ones are suspended. The launcher itself fetches nothing.
 .PARAMETER Open
     Id of the dashboard to open first (used after a dashboard update relaunches the launcher).
+.PARAMETER Restarted
+    Set by the Restart & Reload button: shows a "restarted" message once the window is up.
 .PARAMETER Debug
     Enables DevTools and context menus in every view.
 #>
 param(
     [string]$Open = '',
+    [switch]$Restarted,
     [switch]$Debug
 )
 
@@ -26,6 +29,7 @@ if ($Open -cnotmatch '^[a-z][a-z0-9]{1,19}$') { $Open = '' }
 if ([Threading.Thread]::CurrentThread.GetApartmentState() -ne 'STA') {
     $relaunch = @('-NoProfile', '-STA', '-ExecutionPolicy', 'Bypass', '-File', $PSCommandPath)
     if ($Open) { $relaunch += @('-Open', $Open) }
+    if ($Restarted) { $relaunch += '-Restarted' }
     if ($Debug) { $relaunch += '-Debug' }
     & powershell.exe @relaunch
     exit $LASTEXITCODE
@@ -841,6 +845,38 @@ function Complete-StopAllTraffic {
     Push-RailState
 }
 
+# Restart & Reload: close the launcher (every dashboard is stopped cleanly) and start it again on the same tab, so
+# changed module files are read afresh. A hidden helper waits for this process to exit, then starts the .bat.
+$script:PendingRestart = $null
+function Complete-Restart {
+    $p = $script:PendingRestart
+    $ok = $false
+    try {
+        $busy = @()
+        foreach ($t in $script:Tabs) { if ($t.State -eq 'ready' -and $t.Status -and $t.Status.Syncing) { $busy += "$($t.Name) is syncing" } }
+        if ($script:InstallProc -and -not $script:InstallProc.HasExited) { $busy += 'a module is installing' }
+        $go = $true
+        if ($busy.Count) {
+            $q = "{0}.`n`nRestarting stops it. Restart DashLauncher now?" -f ($busy -join ' and ')
+            $go = ([Windows.Forms.MessageBox]::Show($q, $AppName, 'YesNo', 'Question') -eq 'Yes')
+        }
+        if ($go) {
+            $openId = if ($script:Active -and $script:ById.ContainsKey($script:Active)) { $script:Active } else { [string]$script:Settings.lastTab }
+            $h = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', ('"{0}"' -f (Join-Path $Root 'Restart-DashLauncher.ps1')),
+                   '-AppDir', ('"{0}"' -f $Root), '-ParentPid', [string]$PID)
+            if ($openId -cmatch '^[a-z][a-z0-9]{1,19}$') { $h += @('-Open', $openId) }
+            if ($Debug) { $h += '-DebugMode' }
+            Start-Process -FilePath 'powershell.exe' -ArgumentList $h -WindowStyle Hidden | Out-Null
+            $ok = $true
+        }
+    } catch {
+        Show-Toast ("Could not restart: {0}" -f $_.Exception.Message)
+    }
+    $script:PendingRestart = $null
+    if ($p) { Send-View $p.View ('{{"id":{0},"ok":true,"data":{1}}}' -f $p.Id, $ok.ToString().ToLower()) }
+    if ($ok) { $form.Close() }
+}
+
 $script:Scanning = $false
 $script:PendingScan = $null
 function Invoke-Rescan {
@@ -1010,6 +1046,12 @@ function Invoke-LauncherCommand {
             $script:PendingScan = @{ View = $View; Id = [int]$Msg.id }
             [void]$form.BeginInvoke([Action]{ Complete-Scan })
         }
+        'app.restart' {
+            # may ask first (a sync or install is running), so run it just after this WebView2 event returns
+            if ($script:PendingRestart) { & $reply 'false'; return }
+            $script:PendingRestart = @{ View = $View; Id = [int]$Msg.id }
+            [void]$form.BeginInvoke([Action]{ Complete-Restart })
+        }
         'catalog.download' {
             # open the release download (or its page) in the default browser; only github.com links for that repo
             $t = & $tabArg
@@ -1101,6 +1143,7 @@ $form.add_Shown({
     $timer.Start()
     Start-CatalogCheck -MinMinutes 60
     Start-UpdateCheckIfDue
+    if ($Restarted) { Show-Toast 'DashLauncher restarted. Modules were read again.' }
 })
 
 $form.add_FormClosing({

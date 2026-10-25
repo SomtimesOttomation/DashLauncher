@@ -63,6 +63,9 @@ body.rail { background: var(--rail); overflow: hidden; user-select: none; }
 .rail-btn svg { width: 19px; height: 19px; }
 .rail-btn:disabled { opacity: .5; cursor: progress; }
 .rail-btn:hover { background: color-mix(in srgb, var(--surface) 70%, transparent); color: var(--text); border-color: var(--line); }
+.rail-btn.spin svg { animation: rail-spin .9s linear infinite; }
+@keyframes rail-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .rail-btn.spin svg { animation: none; } }
 .rail-btn.kill:hover { color: #fff; background: var(--live); border-color: var(--live); }
 .rail-ver { position: relative; font-size: 10px; color: var(--muted); letter-spacing: .02em; background: none; border: 0; padding: 3px 6px; border-radius: 6px; }
 .rail-ver:hover, .rail-ver.open { color: var(--text); background: color-mix(in srgb, var(--surface) 70%, transparent); }

@@ -7,6 +7,7 @@ const ICON = {
   dark: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M19.5 14.5A8 8 0 1 1 9.5 4.5a6.5 6.5 0 0 0 10 10z"/></svg>',
   stop: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M8.3 3h7.4L21 8.3v7.4L15.7 21H8.3L3 15.7V8.3z"/><rect x="9" y="9" width="6" height="6" rx="1" fill="currentColor" stroke="none"/></svg>',
   scan: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3.5 7a2 2 0 0 1 2-2h3.5l2 2.5h7.5a2 2 0 0 1 2 2V11"/><path d="M3.5 7v10.5a2 2 0 0 0 2 2H11"/><circle cx="16.5" cy="16.5" r="3.5"/><path d="m19 19 2 2"/></svg>',
+  restart: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M20 12a8 8 0 1 1-2.6-5.9"/><path d="M20 4v5h-5"/></svg>',
   lock: '<svg viewBox="0 0 12 12" fill="currentColor"><rect x="2" y="5" width="8" height="6" rx="1.2"/><path d="M4 5V3.8a2 2 0 0 1 4 0V5" fill="none" stroke="currentColor" stroke-width="1.4"/></svg>',
   up: '<svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 10V2.5M2.8 5.5 6 2.3l3.2 3.2"/></svg>',
 };
@@ -21,6 +22,7 @@ const tabsEl = document.getElementById('tabs');
 const themeBtn = document.getElementById('btn-theme');
 const killBtn = document.getElementById('btn-kill');
 const scanBtn = document.getElementById('btn-scan');
+const restartBtn = document.getElementById('btn-restart');
 const verEl = document.getElementById('ver');
 
 let state = { tabs: [], active: '', theme: 'system', launcherUpdate: '', overlay: '' };
@@ -86,6 +88,16 @@ scanBtn.addEventListener('click', async () => {
   try { await bridge.request('modules.scan', {}, 600000); }    // may wait on approval dialogs; the host shows the result as a toast
   catch (err) { console.warn(err.message); }
   scanBtn.disabled = false;
+});
+
+restartBtn.innerHTML = ICON.restart;
+restartBtn.addEventListener('click', async () => {
+  restartBtn.disabled = true;
+  restartBtn.classList.add('spin');
+  let going = false;
+  try { going = await bridge.request('app.restart', {}, 600000) === true; }     // may wait on a question; on success the window closes and comes back
+  catch (err) { console.warn(err.message); }
+  if (!going) { restartBtn.disabled = false; restartBtn.classList.remove('spin'); }
 });
 
 killBtn.innerHTML = ICON.stop;

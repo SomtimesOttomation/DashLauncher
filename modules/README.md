@@ -14,5 +14,9 @@ here. Or download the zip yourself, extract it into a new folder here, and press
 DashLauncher also looks in this folder every time it starts, and when you press Scan for modules. DashLauncher's own
 updates never change this folder.
 
+Replaced a module with a newer version while DashLauncher was open? Press **Restart & Reload** at the bottom of the tab
+rail: DashLauncher closes and starts again on the same tab, running the new files. (Scan only notices modules that were
+added or removed; it does not reload one that is already running.)
+
 Moving a dashboard you already use into this folder? If it set up a Windows scheduled task (NBADash's nightly sync
 does), turn that off and on again in the dashboard's Settings afterwards, so the task points at the new folder.

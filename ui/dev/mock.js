@@ -38,6 +38,7 @@ export async function request(cmd, args) {
       return { version: '0.2.0', theme, debug: true };
     case 'tab.select': active = args.id; setTimeout(() => emit('tabs', { tabs, active, theme }), 10); return true;
     case 'theme.set': theme = args.theme; return true;
+    case 'app.restart': return window.confirm('Mock: restart DashLauncher?') ? true : false;
     case 'modules.scan': return { added: 1, removed: 0, broken: 0, total: tabs.length };
     case 'traffic.stop': return window.confirm('Stop all traffic in every dashboard now?') ? 2 : 0;
     case 'panel.get': return { notice: notices[location.hash.slice(1)] || notices.locked, theme };
