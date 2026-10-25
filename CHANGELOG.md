@@ -4,6 +4,10 @@ Changes are grouped by label: Feature, Bug/Fix, Redesign, Housekeeping. Every me
 
 ## Unreleased
 
+## Released
+
+### v0.3.0
+
 **Feature**
 - One-click Install on a greyed module's page: downloads the release, checks its checksum and dash.json, and turns the tab on. Manual steps stay as a fallback.
 
@@ -13,8 +17,6 @@ Changes are grouped by label: Feature, Bug/Fix, Redesign, Housekeeping. Every me
 **Housekeeping**
 - README: moving an installed dashboard into `modules` means turning its nightly sync off and on again.
 - Contract: `Context.Relaunch` is spelled out as a full command line.
-
-## Released
 
 ### v0.2.0
 
