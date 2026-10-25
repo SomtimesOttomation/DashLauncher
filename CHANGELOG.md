@@ -4,6 +4,10 @@ Changes are grouped by label: Feature, Bug/Fix, Redesign, Housekeeping. Every me
 
 ## Unreleased
 
+## Released
+
+### v0.2.0
+
 **Feature**
 - Launcher window with sport tabs down the left side; each dashboard opens in its own view and only the visible one runs.
 - Dashboard modules live in DashLauncher's `modules` folder. They are found at start and with the Scan for modules button.

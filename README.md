@@ -60,7 +60,7 @@ fetching anything. Close the dashboard first. `tests\Test-Manifest.ps1` checks t
 | 1 | NBADash split into a backend module and a thin host, with no visible change | [NBADash](https://github.com/SomtimesOttomation/NBADash) (done) |
 | 2 | Launcher v0.1: window, tab rail, NBA tab, first-run approval | this repo (done) |
 | 3 | Launcher v0.2: a no-network Sample dash, tab badges, keyboard switching | this repo (done) |
-| 4 | Launcher updater and release workflow (never touches `modules`) | this repo (in testing) |
+| 4 | Launcher updater and release workflow (never touches `modules`) | this repo (done) |
 | 5 | v1.0: more sports plug in through their own `dash.json` | each sport's repo |
 
 ## How a dashboard plugs in
