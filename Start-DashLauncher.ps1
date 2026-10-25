@@ -279,6 +279,66 @@ function Confirm-UpdateStarted {
     }
 }
 
+# ---------------------------------------------------------------- one-click install of a catalog module (child process)
+# Install-DashModule.ps1 downloads the release zip and its checksum, checks them, unpacks into modules and checks the
+# dash.json id; the launcher then rescans and the greyed tab becomes a working one.
+$script:InstallProc = $null
+$script:InstallOut = Join-Path $script:DataDir 'install.out'
+$script:InstallResult = Join-Path $script:DataDir 'install-result.json'
+$script:Install = @{ id = ''; status = 'idle'; pct = 0; text = ''; error = '' }
+$script:LastInstallJson = ''
+function Send-InstallState {
+    $json = ConvertTo-Json -InputObject @{ event = 'install'; data = $script:Install } -Depth 3 -Compress
+    if ($json -ne $script:LastInstallJson) { $script:LastInstallJson = $json; Send-View $panelView $json }
+}
+function Start-ModuleInstall {
+    param($Tab)
+    if ($script:InstallProc -and -not $script:InstallProc.HasExited) { return 'Another module is installing. Wait for it to finish.' }
+    $repo = $Tab.Catalog.Repo
+    $zip = [string]$Tab.Release.Asset; $sha = [string]$Tab.Release.Sha
+    if ($zip -notlike "https://github.com/$repo/releases/download/*" -or $sha -notlike "https://github.com/$repo/releases/download/*") { return 'This release has no package that can be installed automatically.' }
+    Remove-Item $script:InstallResult -Force -ErrorAction SilentlyContinue
+    $argsList = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', ('"{0}"' -f (Join-Path $Root 'Install-DashModule.ps1')),
+                  '-Id', $Tab.Id, '-Repo', $repo, '-ZipUrl', ('"{0}"' -f $zip), '-ShaUrl', ('"{0}"' -f $sha),
+                  '-ModulesDir', ('"{0}"' -f $script:ModulesDir), '-ResultFile', ('"{0}"' -f $script:InstallResult))
+    $script:InstallProc = Start-Process -FilePath 'powershell.exe' -ArgumentList $argsList -WindowStyle Hidden -PassThru -RedirectStandardOutput $script:InstallOut
+    $script:Install = @{ id = $Tab.Id; status = 'installing'; pct = 0; text = 'Starting...'; error = '' }
+    Send-InstallState
+    return ''
+}
+function Watch-Install {
+    # from the timer: progress while it runs, then rescan so the tab turns on
+    if (-not $script:InstallProc) { return }
+    if (-not $script:InstallProc.HasExited) {
+        $p = @{ pct = 0; text = '' }
+        try {
+            $fs = [IO.File]::Open($script:InstallOut, 'Open', 'Read', 'ReadWrite'); $sr = New-Object IO.StreamReader($fs)
+            while (($l = $sr.ReadLine()) -ne $null) { if ($l -match '^##PROGRESS (\d+)\|(.*)$') { $p.pct = [int]$Matches[1]; $p.text = $Matches[2] } }
+            $sr.Close()
+        } catch { }
+        $script:Install.pct = $p.pct; $script:Install.text = $p.text
+        Send-InstallState
+        return
+    }
+    $script:InstallProc = $null
+    $res = $null
+    try { $res = Get-Content $script:InstallResult -Raw | ConvertFrom-Json } catch { }
+    $id = $script:Install.id
+    $name = $(if ($script:ById.ContainsKey($id)) { $script:ById[$id].Name } else { $id })
+    if ($res -and [string]$res.status -eq 'installed') {
+        $script:Install = @{ id = $id; status = 'installed'; pct = 100; text = 'Installed'; error = '' }
+        Send-InstallState
+        Show-Toast ("{0} is installed." -f $name)
+        [void](Invoke-Rescan)
+        if ($script:ById.ContainsKey($id) -and $script:Active -ne $id) { $script:Active = ''; Select-Tab $id }
+    } else {
+        $why = $(if ($res -and $res.error) { [string]$res.error } else { 'The installer ended without an answer.' })
+        $script:Install = @{ id = $id; status = 'error'; pct = 0; text = ''; error = $why }
+        Send-InstallState
+        if ($script:Active -eq $id) { Show-Notice }
+    }
+}
+
 # ---------------------------------------------------------------- tabs
 $script:Tabs = New-Object System.Collections.ArrayList
 $script:ById = @{}
@@ -505,7 +565,8 @@ function Get-Notice {
         return @{
             kind = 'available'; id = $t.Id; name = $t.Name; title = $t.Catalog.Title; repo = $t.Catalog.Repo
             version = $t.Release.Version; publishedAt = $t.Release.PublishedAt; assetName = $t.Release.AssetName
-            hasAsset = [bool]$t.Release.Asset; source = $t.Release.Source
+            hasAsset = [bool]$t.Release.Asset; hasSha = [bool]$t.Release.Sha; source = $t.Release.Source
+            install = $(if ($script:Install.id -eq $t.Id) { $script:Install } else { $null })
             modulesDir = $script:ModulesDir; target = (Join-Path $script:ModulesDir $repoName)
         }
     }
@@ -957,6 +1018,13 @@ function Invoke-LauncherCommand {
             if ($url -notlike "https://github.com/$($t.Catalog.Repo)/*") { & $fail 'bad link'; return }
             try { Start-Process $url; & $reply 'true' } catch { & $fail $_.Exception.Message }
         }
+        'catalog.install' {
+            $t = & $tabArg
+            if (-not $t -or $t.State -ne 'available') { & $fail 'not available'; return }
+            $err = Start-ModuleInstall $t
+            if ($err) { & $fail $err; return }
+            & $reply 'true'
+        }
         'modules.open' {
             try { Start-Process -FilePath 'explorer.exe' -ArgumentList ('"{0}"' -f $script:ModulesDir); & $reply 'true' } catch { & $fail $_.Exception.Message }
         }
@@ -1015,6 +1083,7 @@ $timer.add_Tick({
     if ($script:Tick % 8 -eq 0) { Test-RunningModules; Push-RailState }
     if ($script:CatalogJob -and $script:CatalogJob.Handle.IsCompleted) { Complete-CatalogCheck }
     if ($script:UpdProc) { Watch-Updater }
+    if ($script:InstallProc) { Watch-Install }
 })
 
 # ---------------------------------------------------------------- start and close
@@ -1038,6 +1107,7 @@ $form.add_FormClosing({
     $timer.Stop()
     if ($script:CatalogJob) { try { $script:CatalogJob.Ps.Stop(); $script:CatalogJob.Ps.Dispose() } catch { } }
     try { if ($script:UpdProc -and -not $script:UpdProc.HasExited) { $script:UpdProc.Kill() } } catch { }
+    try { if ($script:InstallProc -and -not $script:InstallProc.HasExited) { $script:InstallProc.Kill() } } catch { }
     foreach ($t in @($script:Tabs)) {
         if ($t.Init) { try { Invoke-DashFn $t 'Stop-Dash' | Out-Null } catch { } }
     }

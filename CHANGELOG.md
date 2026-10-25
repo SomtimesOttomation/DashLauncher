@@ -4,6 +4,9 @@ Changes are grouped by label: Feature, Bug/Fix, Redesign, Housekeeping. Every me
 
 ## Unreleased
 
+**Feature**
+- One-click Install on a greyed module's page: downloads the release, checks its checksum and dash.json, and turns the tab on. Manual steps stay as a fallback.
+
 **Bug/Fix**
 - A moved or second copy of DashLauncher now always looks in its own modules folder, not the first copy's.
 

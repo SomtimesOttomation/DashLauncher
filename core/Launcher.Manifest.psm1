@@ -131,6 +131,7 @@ function Find-Dashes {
     foreach ($scan in @($ScanFolders)) {
         if (-not $scan -or -not (Test-Path -LiteralPath $scan -PathType Container)) { continue }
         foreach ($dir in @(Get-ChildItem -LiteralPath $scan -Directory -ErrorAction SilentlyContinue | Sort-Object Name)) {
+            if ($dir.Name.StartsWith('.')) { continue }                 # .installing-<id>: an install in progress
             $full = $dir.FullName.TrimEnd('\', '/')
             if ($skip -contains $full -or $seenFolders.ContainsKey($full.ToLowerInvariant())) { continue }
             if (-not (Test-Path -LiteralPath (Join-Path $full 'dash.json') -PathType Leaf)) { continue }

@@ -10,9 +10,9 @@ Windows PowerShell 5.1 + WebView2. No installer, no admin rights, no build step.
 1. Unzip DashLauncher anywhere, for example `C:\Tools\DashLauncher`.
 2. Double-click `Start-DashLauncher.bat`. On first run it downloads the WebView2 wrapper DLLs into `lib\` (no admin
    needed). The WebView2 runtime itself ships with Edge.
-3. Published dashboards show as greyed tabs. Click one: its page links to the latest release on GitHub. Download the
-   zip, extract it into DashLauncher's `modules` folder (the page shows the exact folder), and press **Refresh**. The
-   tab turns to colour and opens.
+3. Published dashboards show as greyed tabs. Click one and press **Install**: DashLauncher downloads the latest
+   release from GitHub, checks it against its published checksum, puts it in the `modules` folder, and the tab turns to
+   colour and opens. "Install it yourself instead" on the same page has the manual steps.
    ```
    C:\Tools\DashLauncher\
      Start-DashLauncher.bat

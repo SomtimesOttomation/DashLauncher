@@ -115,17 +115,30 @@ function render(n) {
     case 'available': {
       const when = n.publishedAt ? new Date(n.publishedAt).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' }) : '';
       const rel = n.version ? `Latest release <strong>v${esc(n.version)}</strong>${when ? `, published ${esc(when)}` : ''}.` : 'Its latest release is on GitHub.';
-      h = head('download', 'info', `Get ${name}`) +
-        `<p>${esc(name)} isn't installed yet. ${rel}</p>
+      const ins = n.install || { status: 'idle' };
+      const canInstall = n.hasAsset && n.hasSha;
+      let top = '';
+      if (ins.status === 'installing') {
+        top = `<div class="progress"><div style="width:${Math.max(2, ins.pct || 0)}%"></div></div><p class="note">${esc(ins.text || 'Starting...')}</p>`;
+      } else if (canInstall) {
+        top = (ins.status === 'error' ? `<pre>${esc(ins.error)}</pre>` : '') +
+          `<div class="actions"><button class="btn primary" data-act="install">${ins.status === 'error' ? 'Try again' : `Install ${esc(n.name)}`}</button></div>
+           <p class="note">Downloads v${esc(n.version)} from GitHub, checks it against its published checksum, and puts it in the modules folder.</p>`;
+      }
+      const manual = `
          <ol class="steps">
-           <li><button class="btn primary" data-act="download">${n.hasAsset ? `Download ${esc(n.assetName || 'the zip')}` : 'Open the release on GitHub'}</button></li>
+           <li><button class="btn ${canInstall ? '' : 'primary'}" data-act="download">${n.hasAsset ? `Download ${esc(n.assetName || 'the zip')}` : 'Open the release on GitHub'}</button></li>
            <li>Right-click the zip, choose <strong>Extract All</strong>, and extract it to:<span class="path">${esc(n.target)}</span>
              <button class="btn" data-act="folder">Open the modules folder</button></li>
            <li>Come back here and press <strong>Refresh</strong>. The ${esc(n.name)} tab turns from grey to colour, ready to use.
              <button class="btn" data-act="refresh">Refresh</button></li>
          </ol>
-         <p class="note" id="note" hidden></p>
-         ${n.hasAsset ? '<p class="note"><a href="#" data-act="page">See the release notes on GitHub</a></p>' : ''}
+         <p class="note" id="note" hidden></p>`;
+      h = head('download', 'info', `Get ${name}`) +
+        `<p>${esc(name)} isn't installed yet. ${rel}</p>` + top +
+        (canInstall ? `<details class="manual" ${ins.status === 'error' ? 'open' : ''}><summary>Install it yourself instead</summary>${manual}</details>`
+                    : manual) +
+        `${n.hasAsset ? '<p class="note"><a href="#" data-act="page">See the release notes on GitHub</a></p>' : ''}
          ${n.source === 'manual' ? '<p class="note">Shown because it is enabled in catalog.json.</p>' : ''}`;
       break;
     }
@@ -158,7 +171,7 @@ root.addEventListener('click', async (e) => {
   if (b.dataset.act === 'uauto') { bridge.request('update.auto', { on: b.checked }).catch(() => {}); return; }   // let the box tick
   const id = root.dataset.id;
   e.preventDefault();
-  const cmd = { uclose: 'update.close', ucheck: 'update.check', ustage: 'update.stage', ucancel: 'update.cancel', uapply: 'update.apply', reload: 'tab.reload', close: 'tab.close', retry: 'tab.retry', approve: 'tab.approve', switch: 'tab.switchTo', download: 'catalog.download', page: 'catalog.download', folder: 'modules.open', refresh: 'modules.scan' }[b.dataset.act];
+  const cmd = { install: 'catalog.install', uclose: 'update.close', ucheck: 'update.check', ustage: 'update.stage', ucancel: 'update.cancel', uapply: 'update.apply', reload: 'tab.reload', close: 'tab.close', retry: 'tab.retry', approve: 'tab.approve', switch: 'tab.switchTo', download: 'catalog.download', page: 'catalog.download', folder: 'modules.open', refresh: 'modules.scan' }[b.dataset.act];
   b.disabled = true;
   try {
     const args = b.dataset.act === 'page' ? { id, page: true } : { id };
@@ -180,6 +193,7 @@ root.addEventListener('click', async (e) => {
 });
 
 bridge.on('notice', render);
+bridge.on('install', (st) => { if (current && current.kind === 'available' && current.id === st.id && st.status !== 'installed') render({ ...current, install: st }); });
 bridge.on('update', (u) => { if (current && current.kind === 'update') render({ ...current, update: u }); });
 bridge.on('theme', (d) => bridge.setTheme(d && d.theme));
 

@@ -89,6 +89,8 @@ body.panel { background: var(--bg); display: grid; place-items: center; padding:
 .btn.primary { background: var(--accent2); border-color: var(--accent2); color: var(--on-accent2); }
 .btn.primary:hover { filter: brightness(1.08); }
 .note { margin-top: 14px; font-size: 12.5px; color: var(--muted); }
+.manual { margin-top: 16px; }
+.manual summary { cursor: pointer; color: var(--accent2); font-weight: 600; font-size: 13px; }
 .back { background: none; border: 0; padding: 0; margin-bottom: 14px; color: var(--accent2); font-weight: 600; }
 .notes { margin-top: 14px; padding: 12px 14px; border-radius: 10px; background: var(--surface2); max-height: 260px; overflow: auto; font-size: 13px; }
 .notes h3 { font-size: 13px; margin: 10px 0 4px; }

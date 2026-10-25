@@ -44,7 +44,7 @@ if ($missing.Count) { Fail ("backend is missing: " + ($missing -join ', ')) } el
 if ($mod.ExportedCommands['Invoke-DashSync']) { Pass 'backend exports the optional Invoke-DashSync' } else { Note 'no Invoke-DashSync (optional; the master sync would skip this dash)' }
 $text = [IO.File]::ReadAllText($info.Paths['backend'])
 if ($text -match 'Microsoft\.Web\.WebView2|Windows\.Forms\.Form\b') { Fail 'backend mentions WebView2 or creates a Form; only the host may do that' } else { Pass 'backend creates no window and does not load WebView2' }
-$nonAscii = @(Get-ChildItem -LiteralPath $folder -Recurse -File -Include *.ps1, *.psm1, *.bat -ErrorAction SilentlyContinue | Where-Object { [IO.File]::ReadAllText($_.FullName) -match '[^\x00-\x7F]' })
+$nonAscii = @(Get-ChildItem -LiteralPath $folder -Recurse -File -ErrorAction SilentlyContinue | Where-Object { @('.ps1', '.psm1', '.bat') -contains $_.Extension.ToLowerInvariant() -and [IO.File]::ReadAllText($_.FullName) -match '[^\x00-\x7F]' })
 if ($nonAscii.Count) { Fail ('non-ASCII characters in: ' + (($nonAscii | ForEach-Object { $_.Name }) -join ', ')) } else { Pass 'scripts are ASCII-only' }
 if ($missing.Count -or $SkipInit) { Write-Host ("Done: {0} problem(s)." -f $script:Fail); exit ([int]($script:Fail -gt 0)) }
 

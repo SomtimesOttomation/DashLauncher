@@ -39,8 +39,10 @@ from its own `.bat`, wherever its folder sits, including inside `modules`.
 
 DashLauncher's `catalog.json` lists known dashes by id and GitHub repo. A listed dash that is not installed shows as a
 greyed tab once its repo has a published release (not a draft or pre-release) at or above the catalog's `minVersion`;
-its page links to the release zip and explains where to extract it. For that to work, the release zip must have
-`dash.json` at its root, so extracting it into `modules\<name>` gives a working dash. If GitHub cannot be reached, the
+its page has an Install button and manual steps. For that to work, the release zip must have `dash.json` at its root (or
+inside one top folder), and the release must attach `<zip name>.sha256`: Install downloads both, checks the checksum,
+checks the `dash.json` id matches the catalog, and puts the dash in `modules\<repo name>`. An existing folder is never
+replaced. If GitHub cannot be reached, the
 last answer seen is used; `"published": true` in `catalog.json` shows a dash regardless, and `false` hides it.
 
 ## dash.json

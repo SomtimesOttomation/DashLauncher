@@ -48,12 +48,12 @@ function Read-Catalog {
 function Get-ReleaseInfo {
     <#
     .SYNOPSIS  Asks GitHub for each repo's latest published release. One request per repo, 10 second timeout.
-    .OUTPUTS   One object per repo: Repo, Status ('published' | 'none' | 'error'), Tag, Url, Asset, AssetName, PublishedAt, Error.
+    .OUTPUTS   One object per repo: Repo, Status ('published' | 'none' | 'error'), Tag, Url, Asset, AssetName, Sha, PublishedAt, Error.
     #>
     param([string[]]$Repos)
     try { [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12 } catch { }
     foreach ($repo in @($Repos)) {
-        $r = [pscustomobject]@{ Repo = $repo; Status = 'error'; Tag = ''; Url = ''; Asset = ''; AssetName = ''; PublishedAt = ''; Error = '' }
+        $r = [pscustomobject]@{ Repo = $repo; Status = 'error'; Tag = ''; Url = ''; Asset = ''; AssetName = ''; Sha = ''; PublishedAt = ''; Error = '' }
         if ($repo -notmatch $script:RepoPattern) { $r.Error = 'bad repo name'; $r; continue }
         try {
             $rel = Invoke-RestMethod -Uri "https://api.github.com/repos/$repo/releases/latest" -UseBasicParsing -TimeoutSec 10 `
@@ -63,7 +63,11 @@ function Get-ReleaseInfo {
             $r.Url = [string]$rel.html_url
             $r.PublishedAt = [string]$rel.published_at
             $zip = @($rel.assets | Where-Object { [string]$_.name -match '\.zip$' }) | Select-Object -First 1
-            if ($zip) { $r.Asset = [string]$zip.browser_download_url; $r.AssetName = [string]$zip.name }
+            if ($zip) {
+                $r.Asset = [string]$zip.browser_download_url; $r.AssetName = [string]$zip.name
+                $sha = @($rel.assets | Where-Object { [string]$_.name -eq ([string]$zip.name + '.sha256') }) | Select-Object -First 1
+                if ($sha) { $r.Sha = [string]$sha.browser_download_url }
+            }
         } catch {
             $code = 0
             try { $code = [int]$_.Exception.Response.StatusCode } catch { }
@@ -78,11 +82,11 @@ function Resolve-CatalogEntry {
     .SYNOPSIS  Decides whether a catalog entry is shown as available, and where to download it.
     .PARAMETER Result  This run's Get-ReleaseInfo answer for the entry's repo, or $null if none.
     .PARAMETER Cached  The last good answer saved from an earlier run, or $null.
-    .OUTPUTS   Show, Source ('manual' | 'github' | 'cache' | 'fallback'), Version, Url, Asset, AssetName, PublishedAt, Reason
+    .OUTPUTS   Show, Source ('manual' | 'github' | 'cache' | 'fallback'), Version, Url, Asset, AssetName, Sha, PublishedAt, Reason
     #>
     param([Parameter(Mandatory)]$Entry, $Result, $Cached)
     $page = "https://github.com/$($Entry.Repo)/releases/latest"
-    $o = [pscustomobject]@{ Show = $false; Source = ''; Version = ''; Url = $page; Asset = ''; AssetName = ''; PublishedAt = ''; Reason = '' }
+    $o = [pscustomobject]@{ Show = $false; Source = ''; Version = ''; Url = $page; Asset = ''; AssetName = ''; Sha = ''; PublishedAt = ''; Reason = '' }
     $use = $null
     if ($Result -and $Result.Status -ne 'error') { $use = $Result; $o.Source = 'github' }
     elseif ($Cached -and $Cached.Status -ne 'error') { $use = $Cached; $o.Source = 'cache' }
@@ -91,7 +95,11 @@ function Resolve-CatalogEntry {
             $v = ConvertTo-DashVersion $use.Tag
             $o.Version = $(if ($v) { $v.ToString() } else { [string]$use.Tag })
             if ($use.Url -like "https://github.com/$($Entry.Repo)/*") { $o.Url = $use.Url }
-            if ($use.Asset -like "https://github.com/$($Entry.Repo)/releases/download/*") { $o.Asset = $use.Asset; $o.AssetName = $use.AssetName }
+            if ($use.Asset -like "https://github.com/$($Entry.Repo)/releases/download/*") {
+                $o.Asset = $use.Asset; $o.AssetName = $use.AssetName
+                if ([string]$use.Sha -like "https://github.com/$($Entry.Repo)/releases/download/*") { $o.Sha = [string]$use.Sha }
+                else { $o.Sha = $o.Asset + '.sha256' }          # the release workflows publish <zip>.sha256 beside the zip
+            }
             $o.PublishedAt = $use.PublishedAt
             if ($Entry.MinVersion -and (-not $v -or $v -lt $Entry.MinVersion)) { $o.Reason = "latest release is older than $($Entry.MinVersion)" }
             else { $o.Show = $true }
