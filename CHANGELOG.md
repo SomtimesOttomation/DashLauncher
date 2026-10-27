@@ -4,6 +4,9 @@ Changes are grouped by label: Feature, Bug/Fix, Redesign, Housekeeping. Every me
 
 ## Unreleased
 
+**Housekeeping**
+- Shared navigation bar spec for every dash (`docs/NAVBAR-SPEC.md`, copied from NBADash), linked from the contract's checklist.
+
 ## Released
 
 ### v0.4.0
