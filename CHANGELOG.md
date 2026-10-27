@@ -5,6 +5,7 @@ Changes are grouped by label: Feature, Bug/Fix, Redesign, Housekeeping. Every me
 ## Unreleased
 
 **Feature**
+- The window's title bar follows the theme (dark or light, in the launcher's colours) instead of always white, and the corners are rounded on Windows 11.
 - Restart & Reload button on the tab rail: closes DashLauncher and starts it again on the same tab, so an updated module dropped into `modules` runs its new files. It asks first if a dashboard is syncing or a module is installing.
 
 ## Released

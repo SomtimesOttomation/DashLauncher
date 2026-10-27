@@ -52,6 +52,7 @@ Add-Type -Namespace DashLauncher -Name Native -MemberDefinition @'
 [System.Runtime.InteropServices.DllImport("user32.dll")] public static extern bool SetForegroundWindow(System.IntPtr hWnd);
 [System.Runtime.InteropServices.DllImport("user32.dll")] public static extern bool ShowWindow(System.IntPtr hWnd, int nCmdShow);
 [System.Runtime.InteropServices.DllImport("user32.dll")] public static extern bool IsIconic(System.IntPtr hWnd);
+[System.Runtime.InteropServices.DllImport("dwmapi.dll")] public static extern int DwmSetWindowAttribute(System.IntPtr hWnd, int attr, ref int value, int size);
 '@
 [DashLauncher.Native]::SetDllDirectory($lib) | Out-Null       # lets .NET find WebView2Loader.dll
 Add-Type -Path (Join-Path $lib 'Microsoft.Web.WebView2.Core.dll')
@@ -521,6 +522,25 @@ function Test-DarkTheme {
     if ($script:Settings.theme -eq 'dark') { return $true }
     if ($script:Settings.theme -eq 'light') { return $false }
     try { return ((Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize' -ErrorAction Stop).AppsUseLightTheme -eq 0) } catch { return $false }
+}
+# Title bar and corners: dark or light to match the theme, and rounded corners. Windows 11 also takes the launcher's own
+# background and text colours for the bar; Windows 10 gets the plain dark or light bar and keeps square corners.
+$script:FrameDark = $null
+function Set-WindowFrame {
+    param([switch]$Force)
+    if (-not $form.IsHandleCreated) { return }
+    $dark = [bool](Test-DarkTheme)
+    if (-not $Force -and $dark -eq $script:FrameDark) { return }
+    $script:FrameDark = $dark
+    $h = $form.Handle
+    $set = { param([int]$Attr, [int]$Value) $v = $Value; try { [DashLauncher.Native]::DwmSetWindowAttribute($h, $Attr, [ref]$v, 4) } catch { -1 } }
+    $on = [int]$dark
+    if ((& $set 20 $on) -ne 0) { [void](& $set 19 $on) }          # dark mode (19 on Windows 10 before 20H1)
+    [void](& $set 33 2)                                             # rounded corners (Windows 11)
+    # COLORREF is 0x00BBGGRR: the --bg and --text colours from launcher.css
+    if ($dark) { [void](& $set 35 0x0017100D); [void](& $set 36 0x00F4ECE8) }
+    else { [void](& $set 35 0x00F8F5F4); [void](& $set 36 0x00221713) }
+    [void](& $set 34 $(if ($dark) { 0x003E2F27 } else { 0x00EAE3DF }))   # border colour: --line
 }
 function Show-Toast {
     param([string]$Text)
@@ -1038,6 +1058,7 @@ function Invoke-LauncherCommand {
             }
             Send-Event $panelView 'theme' @{ theme = $th }
             & $reply 'true'
+            Set-WindowFrame
             Push-RailState
         }
         'modules.scan' {
@@ -1123,13 +1144,16 @@ $timer.add_Tick({
         }
     }
     if ($script:Tick % 8 -eq 0) { Test-RunningModules; Push-RailState }
+    if ($script:Tick % 8 -eq 4 -and $script:Settings.theme -eq 'system') { Set-WindowFrame }     # follows a Windows light/dark switch
     if ($script:CatalogJob -and $script:CatalogJob.Handle.IsCompleted) { Complete-CatalogCheck }
     if ($script:UpdProc) { Watch-Updater }
     if ($script:InstallProc) { Watch-Install }
 })
 
 # ---------------------------------------------------------------- start and close
+$form.add_HandleCreated({ Set-WindowFrame -Force })
 $form.add_Shown({
+    Set-WindowFrame -Force
     [void](Update-Tabs)
     [void]$rail.EnsureCoreWebView2Async($null)
     [void]$panelView.EnsureCoreWebView2Async($null)
