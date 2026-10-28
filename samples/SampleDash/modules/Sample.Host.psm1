@@ -125,10 +125,15 @@ function Invoke-DashCommand {
                 Reply $id ((Start-FakeSync).ToString().ToLower())
             }
             'sync.cancel' { $script:S.SyncStart = $null; Reply $id 'true' }
+            'traffic.stop' {
+                Stop-DashTraffic                  # the same stop as the launcher's button
+                Reply $id (ConvertTo-PageJson (Get-SampleSnapshot))
+            }
             'traffic.resume' {
                 $script:S.Halted = $false
                 $script:S.Paused = -not $script:S.Visible
                 $script:S.NextTick = (Get-Date).AddSeconds(1)
+                Send-Page '{"event":"traffic","data":{"stopped":false}}'
                 Reply $id (ConvertTo-PageJson (Get-SampleSnapshot))
             }
             default { ReplyError $id ('unknown command: ' + [string]$Message.cmd) }

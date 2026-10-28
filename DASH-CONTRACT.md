@@ -153,6 +153,17 @@ The launcher has one button that stops all traffic to data sources happening rig
 on every initialized dash. It is for the sports data sources only; update checks and downloads keep working. There is no matching "start all". After a stop, each dash stays quiet until the person resumes it
 inside that dash; switching tabs does not resume it.
 
+The same stop is also available from inside every dash, so a person can pause one dash without the launcher (NBADash
+does it with the live-status button in its navigation bar, see `docs/NAVBAR-SPEC.md`). Every dash handles two page
+commands:
+
+- `traffic.stop`: runs the dash's own `Stop-DashTraffic`, exactly as the launcher's button does, then replies `ok`.
+- `traffic.resume`: starts traffic again (only from inside the dash), then replies `ok`.
+
+After either one, and after the launcher's stop, the backend sends the page `{"event":"traffic","data":{"stopped":true|false}}`
+so the page shows the same paused state whichever way it was stopped. Update checks keep running while stopped, and no
+settings change. The launcher does not track the paused state itself.
+
 ## Context object
 
 The host builds this before `Initialize-Dash` and keeps it for the dash's lifetime.
@@ -245,6 +256,7 @@ required one raises it, and the launcher keeps supporting the previous number fo
 - [ ] Opening the dash in the launcher while it is open standalone shows the locked message.
 - [ ] A hidden tab makes no timed requests.
 - [ ] After the kill switch, no data source is contacted until the person resumes inside the dash (update checks may still run).
+- [ ] The page commands `traffic.stop` and `traffic.resume` both work and reply `ok`, and each sends the `traffic` event to the page.
 - [ ] Its release zip has `dash.json` at the root; extracted into DashLauncher's `modules` folder, it appears as a tab after Scan for modules.
 - [ ] Every data source is listed in `dataSources`, and its terms have been read.
 - [ ] Helper module names are unique to the dash (for example `Nba.Data`, not `Data`).

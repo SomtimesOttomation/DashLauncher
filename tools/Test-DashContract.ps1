@@ -95,6 +95,17 @@ if ($initOk) {
         $reply = @($posted | Where-Object { $_ -match '"id"\s*:\s*999' })
         if ($reply.Count -and $reply[0] -match '"ok"\s*:\s*false') { Pass 'an unknown command gets an error reply through Context.Post' } else { Fail 'an unknown command should be answered with {id, ok:false, error} through Context.Post' }
     } catch { Fail "Invoke-DashCommand threw on an unknown command: $($_.Exception.Message)" }
+    foreach ($pc in @(@{ Id = 1001; Cmd = 'traffic.stop'; Stopped = 'true' }, @{ Id = 1002; Cmd = 'traffic.resume'; Stopped = 'false' })) {
+        try {
+            $posted.Clear()
+            & $call 'Invoke-DashCommand' @{ Message = [pscustomobject]@{ id = $pc.Id; cmd = $pc.Cmd; args = [pscustomobject]@{} } } | Out-Null
+            $reply = @($posted | Where-Object { $_ -match ('"id"\s*:\s*{0}\b' -f $pc.Id) })
+            $evt = @($posted | Where-Object { $_ -match '"event"\s*:\s*"traffic"' -and $_ -match ('"stopped"\s*:\s*{0}' -f $pc.Stopped) })
+            if (-not $reply.Count -or $reply[0] -notmatch '"ok"\s*:\s*true') { Fail "the page command $($pc.Cmd) must reply ok (see Kill switch in DASH-CONTRACT.md)" }
+            elseif (-not $evt.Count) { Fail "$($pc.Cmd) should send {""event"":""traffic"",""data"":{""stopped"":$($pc.Stopped)}} to the page" }
+            else { Pass "page command $($pc.Cmd) replies ok and sends the traffic event" }
+        } catch { Fail "$($pc.Cmd) threw: $($_.Exception.Message)" }
+    }
     foreach ($fn in 'Suspend-DashWorker', 'Stop-DashTraffic') {
         try { & $call $fn | Out-Null; Pass "$fn ran" } catch { Fail "$fn threw: $($_.Exception.Message)" }
     }

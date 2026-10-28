@@ -6,6 +6,7 @@ Changes are grouped by label: Feature, Bug/Fix, Redesign, Housekeeping. Every me
 
 **Housekeeping**
 - Shared navigation bar spec for every dash (`docs/NAVBAR-SPEC.md`, copied from NBADash), linked from the contract's checklist.
+- Contract: every dash handles the page commands `traffic.stop` and `traffic.resume` and sends the `traffic` event; the Sample dash and `tools\Test-DashContract.ps1` follow.
 - Navigation bar spec: live status is a button that pauses and resumes all data traffic, with a stronger live blink.
 
 ## Released
