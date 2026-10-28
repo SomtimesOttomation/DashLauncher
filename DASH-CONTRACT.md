@@ -227,8 +227,16 @@ can confirm the new version started, exactly as it does standalone. If the dash 
 loads, nothing confirms and the dash's own updater rolls back.
 
 A dash confirms a new version when its page loads, not in `Initialize-Dash`: page load proves the backend and the UI
-both work. A dash never edits the launcher's files, and the launcher never edits a dash's files: the launcher's own updater
-leaves the `modules` folder alone.
+both work. A dash never edits the launcher's files. The launcher's own updater leaves the `modules` folder alone.
+
+The one exception is when the person ticks "Also check my dashboard modules for updates" on the launcher's update page
+(off by default) and chooses to update a module listed in `catalog.json` from there. The launcher then closes that dash
+(`Stop-Dash`), downloads the dash's latest release zip, checks it against its published `.sha256` and its `dash.json` id,
+backs up the files it replaces, and copies the package's files over the dash's folder. It never touches the dash's
+`lib\`, `update\` or `.git\` folders or files the package does not have, and removes leftover files only inside folders
+the package has. If anything fails, the backup is put back. Then the launcher restarts on the same tab. So that this is
+safe, a dash keeps its settings, cache and other data outside its own folder (NBADash uses `%APPDATA%` and
+`%LOCALAPPDATA%`), and its release zip is a complete copy of the dash.
 
 ## Fetching rules
 
@@ -256,6 +264,7 @@ required one raises it, and the launcher keeps supporting the previous number fo
 - [ ] Opening the dash in the launcher while it is open standalone shows the locked message.
 - [ ] A hidden tab makes no timed requests.
 - [ ] After the kill switch, no data source is contacted until the person resumes inside the dash (update checks may still run).
+- [ ] Settings, cache and other data live outside the dash's folder, so an update from the launcher keeps them.
 - [ ] The page commands `traffic.stop` and `traffic.resume` both work and reply `ok`, and each sends the `traffic` event to the page.
 - [ ] Its release zip has `dash.json` at the root; extracted into DashLauncher's `modules` folder, it appears as a tab after Scan for modules.
 - [ ] Every data source is listed in `dataSources`, and its terms have been read.

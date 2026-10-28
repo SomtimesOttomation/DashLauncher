@@ -81,7 +81,7 @@ $script:ModulesDir = Join-Path $Root 'modules'
 if (-not (Test-Path $script:ModulesDir)) { New-Item -ItemType Directory -Path $script:ModulesDir -Force | Out-Null }
 $script:Settings = [pscustomobject]@{
     settingsVersion = 2; scanFolders = @($script:ModulesDir); approved = @(); declined = @(); order = @(); lastTab = ''; theme = 'system'; bounds = $null
-    catalogCheck = $true; updateCheck = $true
+    catalogCheck = $true; updateCheck = $true; moduleUpdateCheck = $false
 }
 if (Test-Path $script:SettingsPath) {
     try {
@@ -94,6 +94,7 @@ if (Test-Path $script:SettingsPath) {
         if ($loaded.bounds) { $script:Settings.bounds = $loaded.bounds }
         if ($loaded.catalogCheck -is [bool]) { $script:Settings.catalogCheck = $loaded.catalogCheck }
         if ($loaded.updateCheck -is [bool]) { $script:Settings.updateCheck = $loaded.updateCheck }
+        if ($loaded.moduleUpdateCheck -is [bool]) { $script:Settings.moduleUpdateCheck = $loaded.moduleUpdateCheck }
     } catch { }
 }
 function Save-Settings {
@@ -239,6 +240,7 @@ function Watch-Updater {
 function Start-UpdateCheckIfDue {
     # at start: at most once a day, and only if the person has not turned it off
     if (-not $script:Settings.updateCheck) { return }
+    Start-ModuleCheck -MinMinutes 1440 -Toast            # only does anything with module checks ticked
     if (@('staged', 'available') -contains $script:Upd.status) { return }
     $last = $null
     if ($prev -and $prev.checkedAt) { try { $last = [datetime]::Parse([string]$prev.checkedAt, [Globalization.CultureInfo]::InvariantCulture) } catch { } }
@@ -342,6 +344,226 @@ function Watch-Install {
         Send-InstallState
         if ($script:Active -eq $id) { Show-Notice }
     }
+}
+
+# ---------------------------------------------------------------- module updates (opt-in, on the update page)
+# With "Also check my dashboard modules for updates" ticked (off by default), the launcher asks GitHub for the latest
+# release of every installed module listed in catalog.json: when the update page opens (at most every 10 minutes), with
+# Check again, and at start along with the launcher's own daily check. The person ticks which ones to update. DashLauncher
+# closes those dashboards, updates each with Install-DashModule.ps1 -UpdateFolder (checksum, backup, rollback), then
+# restarts on the same tab so the new files load fresh, as Restart & Reload does.
+$script:ModRelPath = Join-Path $script:DataDir 'module-releases.json'
+$script:ModRel = @{}                  # repo -> the last Get-ReleaseInfo answer
+$script:ModCheckedAt = ''
+try {
+    if (Test-Path $script:ModRelPath) {
+        $c = Get-Content $script:ModRelPath -Raw | ConvertFrom-Json
+        $script:ModCheckedAt = [string]$c.checkedAt
+        foreach ($p in @($c.results.PSObject.Properties)) { $script:ModRel[$p.Name] = $p.Value }
+    }
+} catch { }
+$script:ModJob = $null
+$script:ModJobToast = $false
+$script:ModProc = $null
+$script:ModOut = Join-Path $script:DataDir 'modupdate.out'
+$script:ModResultPath = Join-Path $script:DataDir 'modupdate-result.json'
+$script:ModDonePath = Join-Path $script:DataDir 'module-update-done.json'
+$script:ModRun = @{ status = 'idle'; queue = @(); total = 0; index = 0; current = ''; pct = 0; text = ''; results = @{}; ok = 0 }
+$script:PendingModUpd = $null
+$script:LastModJson = ''
+
+function Get-CatalogEntry { param([string]$Id) return ($script:Catalog | Where-Object { $_.Id -eq $Id } | Select-Object -First 1) }
+function Get-ModuleRelease {
+    <# The resolved latest release for an installed catalog module, or $null if never checked. #>
+    param($Entry)
+    $r = $script:ModRel[$Entry.Repo]
+    if (-not $r) { return $null }
+    return [pscustomobject]@{ Raw = $r; Res = (Resolve-CatalogEntry -Entry $Entry -Result $r -Cached $null) }
+}
+function Get-ModuleUpdateItems {
+    $items = New-Object System.Collections.Generic.List[object]
+    foreach ($t in @($script:Tabs | Where-Object { $_.Info -and $_.Info.Ok -and @('broken', 'available') -notcontains $_.State })) {
+        $it = [ordered]@{ id = $t.Id; name = $t.Name; title = $t.Info.Title; current = $t.Info.Version; latest = ''; state = 'unknown'; note = '' }
+        $entry = Get-CatalogEntry $t.Id
+        if (-not $entry) { $it.state = 'notlisted'; $it.note = "Not in DashLauncher's list of modules: update it from inside the dashboard." }
+        else {
+            $rel = Get-ModuleRelease $entry
+            if ($rel) {
+                if ($rel.Raw.Status -eq 'error') { $it.state = 'error'; $it.note = [string]$rel.Raw.Error }
+                elseif ($rel.Raw.Status -ne 'published' -or -not $rel.Res.Version) { $it.state = 'none' }
+                else {
+                    $it.latest = $rel.Res.Version
+                    $cv = ConvertTo-DashVersion $t.Info.Version; $lv = ConvertTo-DashVersion $rel.Res.Version
+                    if ($cv -and $lv -and $lv -gt $cv) { $it.state = $(if ($rel.Res.Asset -and $rel.Res.Sha) { 'update' } else { 'nopackage' }) }
+                    elseif ($cv -and $lv -and $lv -lt $cv) { $it.state = 'ahead' }
+                    else { $it.state = 'current' }
+                }
+            }
+        }
+        $res = $script:ModRun.results[$t.Id]
+        if ($res -and -not $res.ok) { $it.note = [string]$res.error }
+        $items.Add([pscustomobject]$it)
+    }
+    return $items.ToArray()
+}
+function Get-ModuleUpdateLatest {
+    # for the rail badge: the newer version this check found for one tab, or $null
+    param($Tab)
+    if (-not $script:Settings.moduleUpdateCheck -or -not $Tab.Info -or -not $Tab.Info.Ok) { return $null }
+    $entry = Get-CatalogEntry $Tab.Id
+    if (-not $entry) { return $null }
+    $rel = Get-ModuleRelease $entry
+    if (-not $rel -or $rel.Raw.Status -ne 'published') { return $null }
+    $cv = ConvertTo-DashVersion $Tab.Info.Version; $lv = ConvertTo-DashVersion $rel.Res.Version
+    if ($cv -and $lv -and $lv -gt $cv) { return $rel.Res.Version }
+    return $null
+}
+function Get-ModuleUpdateState {
+    $r = $script:ModRun
+    return @{
+        enabled = [bool]$script:Settings.moduleUpdateCheck; checking = [bool]$script:ModJob; checkedAt = $script:ModCheckedAt
+        items = @(Get-ModuleUpdateItems)
+        run = @{ status = $r.status; total = $r.total; index = $r.index; current = $r.current; pct = $r.pct; text = $r.text }
+    }
+}
+function Send-ModuleUpdateState {
+    $json = ConvertTo-Json -InputObject @{ event = 'modules'; data = (Get-ModuleUpdateState) } -Depth 6 -Compress
+    if ($json -ne $script:LastModJson) { $script:LastModJson = $json; Send-View $panelView $json }
+}
+function Start-ModuleCheck {
+    <# Asks GitHub about the installed catalog modules in a background runspace. -MinMinutes 0 always asks. #>
+    param([int]$MinMinutes = 10, [switch]$Toast)
+    if (-not $script:Settings.moduleUpdateCheck -or $script:ModJob) { return }
+    if ($MinMinutes -gt 0 -and $script:ModCheckedAt) {
+        try { if (((Get-Date) - [datetime]::Parse($script:ModCheckedAt, [Globalization.CultureInfo]::InvariantCulture)).TotalMinutes -lt $MinMinutes) { return } } catch { }
+    }
+    $repos = @($script:Tabs | Where-Object { $_.Info -and $_.Info.Ok -and @('broken', 'available') -notcontains $_.State } |
+               ForEach-Object { Get-CatalogEntry $_.Id } | Where-Object { $_ } | ForEach-Object { $_.Repo } | Select-Object -Unique)
+    if (-not $repos.Count) { $script:ModCheckedAt = (Get-Date).ToString('o'); Send-ModuleUpdateState; return }
+    $ps = [powershell]::Create()
+    [void]$ps.AddScript("Import-Module '$((Join-Path $Root 'core\Launcher.Catalog.psm1') -replace "'", "''")' -Force; Get-ReleaseInfo -Repos `$args").AddArgument($repos)
+    $script:ModJob = @{ Ps = $ps; Handle = $ps.BeginInvoke() }
+    $script:ModJobToast = [bool]$Toast
+    Send-ModuleUpdateState
+}
+function Complete-ModuleCheck {
+    $j = $script:ModJob
+    if (-not $j -or -not $j.Handle.IsCompleted) { return }
+    $script:ModJob = $null
+    $results = @()
+    try { $results = @($j.Ps.EndInvoke($j.Handle)) } catch { }
+    try { $j.Ps.Dispose() } catch { }
+    foreach ($r in $results) { if ($r -and $r.Repo) { $script:ModRel[[string]$r.Repo] = $r } }
+    $script:ModCheckedAt = (Get-Date).ToString('o')
+    try { [IO.File]::WriteAllText($script:ModRelPath, (ConvertTo-Json -InputObject @{ checkedAt = $script:ModCheckedAt; results = $script:ModRel } -Depth 6), $script:Utf8) } catch { }
+    Send-ModuleUpdateState
+    Push-RailState
+    $names = @(Get-ModuleUpdateItems | Where-Object { $_.state -eq 'update' } | ForEach-Object { $_.name })
+    if ($script:ModJobToast -and $names.Count -and $script:PanelOverride -ne 'update') {
+        Show-Toast ("Module update available: {0}. Click the version at the bottom of the tab rail." -f ($names -join ', '))
+    }
+}
+function Complete-ModuleUpdateStart {
+    # just after the page's mod.update command: may ask first if a chosen dashboard is syncing
+    $p = $script:PendingModUpd
+    $script:PendingModUpd = $null
+    $answer = 'false'
+    try {
+        if ($script:ModRun.status -eq 'updating' -or ($script:InstallProc -and -not $script:InstallProc.HasExited)) { Show-Toast 'Wait for the current install or update to finish.'; return }
+        $pick = @(Get-ModuleUpdateItems | Where-Object { $_.state -eq 'update' -and $p.Ids -contains $_.id })
+        if (-not $pick.Count) { return }
+        $busy = @()
+        foreach ($it in $pick) { $t = $script:ById[$it.id]; if ($t -and $t.State -eq 'ready' -and $t.Status -and $t.Status.Syncing) { $busy += "$($t.Name) is syncing" } }
+        if ($busy.Count) {
+            $q = "{0}.`n`nUpdating stops it. Update now?" -f ($busy -join ' and ')
+            if ([Windows.Forms.MessageBox]::Show($q, $AppName, 'YesNo', 'Question') -ne 'Yes') { return }
+        }
+        $script:ModRun = @{ status = 'updating'; queue = @($pick | ForEach-Object { $_.id }); total = $pick.Count; index = 0; current = ''; pct = 0; text = ''; results = @{}; ok = 0 }
+        $answer = 'true'
+    } finally {
+        if ($p) { Send-View $p.View ('{{"id":{0},"ok":true,"data":{1}}}' -f $p.Id, $answer) }
+    }
+    Start-NextModuleUpdate
+}
+function Start-NextModuleUpdate {
+    $run = $script:ModRun
+    while (@($run.queue).Count) {
+        $id = [string]@($run.queue)[0]
+        $run.queue = @($run.queue | Select-Object -Skip 1)
+        $run.index++
+        $t = $script:ById[$id]
+        $entry = Get-CatalogEntry $id
+        $rel = $(if ($entry) { Get-ModuleRelease $entry } else { $null })
+        if (-not $t -or -not $t.Info -or -not $rel) { $run.results[$id] = @{ ok = $false; error = 'It is no longer installed.' }; continue }
+        $folder = $t.Info.Folder
+        Close-Tab $t                                   # stops it and releases its host lock
+        $m = $null
+        if ([Threading.Mutex]::TryOpenExisting("Local\DashHost-$id", [ref]$m)) {
+            try { $m.Dispose() } catch { }
+            $run.results[$id] = @{ ok = $false; error = "$($t.Name) is open in its own window. Close that window, then update again." }
+            continue
+        }
+        Remove-Item $script:ModResultPath -Force -ErrorAction SilentlyContinue
+        $argsList = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', ('"{0}"' -f (Join-Path $Root 'Install-DashModule.ps1')),
+                      '-Id', $id, '-Repo', $entry.Repo, '-ZipUrl', ('"{0}"' -f $rel.Res.Asset), '-ShaUrl', ('"{0}"' -f $rel.Res.Sha),
+                      '-ModulesDir', ('"{0}"' -f $script:ModulesDir), '-UpdateFolder', ('"{0}"' -f $folder), '-ResultFile', ('"{0}"' -f $script:ModResultPath))
+        $run.current = $id; $run.pct = 0; $run.text = 'Starting...'
+        $script:ModProc = Start-Process -FilePath 'powershell.exe' -ArgumentList $argsList -WindowStyle Hidden -PassThru -RedirectStandardOutput $script:ModOut
+        Send-ModuleUpdateState
+        Push-RailState
+        return
+    }
+    Complete-ModuleUpdates
+}
+function Watch-ModuleUpdate {
+    if (-not $script:ModProc) { return }
+    $run = $script:ModRun
+    if (-not $script:ModProc.HasExited) {
+        try {
+            $fs = [IO.File]::Open($script:ModOut, 'Open', 'Read', 'ReadWrite'); $sr = New-Object IO.StreamReader($fs)
+            while (($l = $sr.ReadLine()) -ne $null) { if ($l -match '^##PROGRESS (\d+)\|(.*)$') { $run.pct = [int]$Matches[1]; $run.text = $Matches[2] } }
+            $sr.Close()
+        } catch { }
+        Send-ModuleUpdateState
+        return
+    }
+    $script:ModProc = $null
+    $res = $null
+    try { $res = Get-Content $script:ModResultPath -Raw | ConvertFrom-Json } catch { }
+    if ($res -and [string]$res.status -eq 'updated') { $run.results[$run.current] = @{ ok = $true; from = [string]$res.from; to = [string]$res.version }; $run.ok++ }
+    else { $run.results[$run.current] = @{ ok = $false; error = $(if ($res -and $res.error) { [string]$res.error } else { 'The updater ended without an answer.' }) } }
+    $run.current = ''
+    Start-NextModuleUpdate
+}
+function Complete-ModuleUpdates {
+    $run = $script:ModRun
+    $list = @(foreach ($k in $run.results.Keys) { $r = $run.results[$k]; $t = $script:ById[$k]; @{ id = $k; name = $(if ($t) { $t.Name } else { $k }); ok = [bool]$r.ok; from = [string]$r.from; to = [string]$r.to; error = [string]$r.error } })
+    if ($run.ok -gt 0) {
+        try { [IO.File]::WriteAllText($script:ModDonePath, (ConvertTo-Json -InputObject @{ results = $list } -Depth 4), $script:Utf8) } catch { }
+        $run.status = 'restarting'
+        Send-ModuleUpdateState
+        try { Start-Relaunch; $form.Close(); return } catch { Show-Toast ("Updated, but could not restart: {0} Use Restart & Reload." -f $_.Exception.Message) }
+    }
+    $run.status = 'idle'
+    Send-ModuleUpdateState
+    Push-RailState
+    $fail = @($list | Where-Object { -not $_.ok } | Select-Object -First 1)
+    if ($fail.Count -and $run.ok -eq 0) { Show-Toast ("{0} was not updated: {1}" -f $fail[0].name, $fail[0].error) }
+}
+function Show-ModuleUpdateResult {
+    # after the restart that follows module updates: say what happened, once
+    if (-not (Test-Path $script:ModDonePath)) { return $false }
+    $d = $null
+    try { $d = Get-Content $script:ModDonePath -Raw | ConvertFrom-Json } catch { }
+    Remove-Item $script:ModDonePath -Force -ErrorAction SilentlyContinue
+    if (-not $d) { return $false }
+    $ok = @($d.results | Where-Object { $_.ok } | ForEach-Object { "{0} v{1}" -f $_.name, $_.to })
+    $bad = @($d.results | Where-Object { -not $_.ok } | ForEach-Object { "{0} was not updated: {1}" -f $_.name, $_.error })
+    $text = ''
+    if ($ok.Count) { $text = 'Updated ' + ($ok -join ', ') + '.' }
+    if ($bad.Count) { $text = ($text + ' ' + ($bad -join ' ')).Trim() }
+    Show-Toast $text
+    return $true
 }
 
 # ---------------------------------------------------------------- tabs
@@ -449,7 +671,8 @@ function ConvertTo-TabJson {
         title = $(if ($T.Info) { $T.Info.Title } elseif ($T.Catalog) { $T.Catalog.Title } else { '' })
         version = $(if ($T.Info) { $T.Info.Version } elseif ($T.Release) { $T.Release.Version } else { '' })
         live = $(if ($s) { [int]$s.Live } else { 0 }); syncing = $(if ($s) { [bool]$s.Syncing } else { $false })
-        syncPct = $(if ($s) { $s.SyncPct } else { $null }); update = $(if ($s) { $s.UpdateAvailable } else { $null })
+        syncPct = $(if ($s) { $s.SyncPct } else { $null })
+        update = $(if ($s -and $s.UpdateAvailable) { $s.UpdateAvailable } else { Get-ModuleUpdateLatest $T })
         statusError = $(if ($s) { $s.Error } else { $null })
     }
 }
@@ -578,7 +801,7 @@ function Push-RailState {
 $script:Notice = $null
 $script:PanelOverride = ''
 function Get-Notice {
-    if ($script:PanelOverride -eq 'update') { return @{ kind = 'update'; update = $script:Upd; updateCheck = [bool]$script:Settings.updateCheck } }
+    if ($script:PanelOverride -eq 'update') { return @{ kind = 'update'; update = $script:Upd; updateCheck = [bool]$script:Settings.updateCheck; modules = (Get-ModuleUpdateState) } }
     $t = $script:ById[$script:Active]
     if (-not $t) {
         $sample = Join-Path $Root 'samples\SampleDash'
@@ -792,6 +1015,7 @@ function Complete-DashView {
 
 function Select-Tab {
     param([string]$Id)
+    if (@('updating', 'restarting') -contains $script:ModRun.status) { Show-Toast 'Wait for the module updates to finish.'; return }
     $script:PanelOverride = ''
     $next = $script:ById[$Id]
     if (-not $next) { return }
@@ -868,6 +1092,15 @@ function Complete-StopAllTraffic {
 # Restart & Reload: close the launcher (every dashboard is stopped cleanly) and start it again on the same tab, so
 # changed module files are read afresh. A hidden helper waits for this process to exit, then starts the .bat.
 $script:PendingRestart = $null
+function Start-Relaunch {
+    # starts the helper that reopens DashLauncher on the same tab once this process has ended; the caller closes the form
+    $openId = if ($script:Active -and $script:ById.ContainsKey($script:Active)) { $script:Active } else { [string]$script:Settings.lastTab }
+    $h = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', ('"{0}"' -f (Join-Path $Root 'Restart-DashLauncher.ps1')),
+           '-AppDir', ('"{0}"' -f $Root), '-ParentPid', [string]$PID)
+    if ($openId -cmatch '^[a-z][a-z0-9]{1,19}$') { $h += @('-Open', $openId) }
+    if ($Debug) { $h += '-DebugMode' }
+    Start-Process -FilePath 'powershell.exe' -ArgumentList $h -WindowStyle Hidden | Out-Null
+}
 function Complete-Restart {
     $p = $script:PendingRestart
     $ok = $false
@@ -880,15 +1113,7 @@ function Complete-Restart {
             $q = "{0}.`n`nRestarting stops it. Restart DashLauncher now?" -f ($busy -join ' and ')
             $go = ([Windows.Forms.MessageBox]::Show($q, $AppName, 'YesNo', 'Question') -eq 'Yes')
         }
-        if ($go) {
-            $openId = if ($script:Active -and $script:ById.ContainsKey($script:Active)) { $script:Active } else { [string]$script:Settings.lastTab }
-            $h = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', ('"{0}"' -f (Join-Path $Root 'Restart-DashLauncher.ps1')),
-                   '-AppDir', ('"{0}"' -f $Root), '-ParentPid', [string]$PID)
-            if ($openId -cmatch '^[a-z][a-z0-9]{1,19}$') { $h += @('-Open', $openId) }
-            if ($Debug) { $h += '-DebugMode' }
-            Start-Process -FilePath 'powershell.exe' -ArgumentList $h -WindowStyle Hidden | Out-Null
-            $ok = $true
-        }
+        if ($go) { Start-Relaunch; $ok = $true }
     } catch {
         Show-Toast ("Could not restart: {0}" -f $_.Exception.Message)
     }
@@ -970,15 +1195,33 @@ function Invoke-LauncherCommand {
             Show-Notice
             Push-RailState
             if (@('idle', 'error', 'none') -contains $script:Upd.status) { [void](Start-Updater 'Check') }
+            Start-ModuleCheck -MinMinutes 10
         }
         'update.close' {
             & $reply 'true'
+            if (@('updating', 'restarting') -contains $script:ModRun.status) { Show-Toast 'Wait for the module updates to finish.'; return }
             $back = $script:Active
             $script:PanelOverride = ''
             $script:Active = ''
             if ($back -and $script:ById.ContainsKey($back)) { Select-Tab $back } else { Show-Notice; Push-RailState }
         }
         'update.check' { & $reply ((Start-Updater 'Check').ToString().ToLower()) }
+        'mod.auto' {
+            $script:Settings.moduleUpdateCheck = [bool]$a.on
+            Save-Settings
+            & $reply 'true'
+            if ($script:Settings.moduleUpdateCheck) { Start-ModuleCheck -MinMinutes 10 }
+            Send-ModuleUpdateState
+            Push-RailState
+        }
+        'mod.check' { & $reply 'true'; Start-ModuleCheck -MinMinutes 0 }
+        'mod.update' {
+            $ids = @(@($a.ids) | Where-Object { $_ -is [string] -and $_ -cmatch '^[a-z][a-z0-9]{1,19}$' })
+            if (-not $ids.Count) { & $fail 'nothing chosen'; return }
+            if ($script:PendingModUpd) { & $reply 'false'; return }
+            $script:PendingModUpd = @{ View = $View; Id = [int]$Msg.id; Ids = $ids }
+            [void]$form.BeginInvoke([Action]{ Complete-ModuleUpdateStart })
+        }
         'update.stage' { & $reply ((Start-Updater 'Stage').ToString().ToLower()) }
         'update.cancel' {
             try { if ($script:UpdProc -and -not $script:UpdProc.HasExited) { $script:UpdProc.Kill() } } catch { }
@@ -1148,6 +1391,8 @@ $timer.add_Tick({
     if ($script:CatalogJob -and $script:CatalogJob.Handle.IsCompleted) { Complete-CatalogCheck }
     if ($script:UpdProc) { Watch-Updater }
     if ($script:InstallProc) { Watch-Install }
+    if ($script:ModJob -and $script:ModJob.Handle.IsCompleted) { Complete-ModuleCheck }
+    if ($script:ModProc) { Watch-ModuleUpdate }
 })
 
 # ---------------------------------------------------------------- start and close
@@ -1167,12 +1412,14 @@ $form.add_Shown({
     $timer.Start()
     Start-CatalogCheck -MinMinutes 60
     Start-UpdateCheckIfDue
-    if ($Restarted) { Show-Toast 'DashLauncher restarted. Modules were read again.' }
+    if (-not (Show-ModuleUpdateResult) -and $Restarted) { Show-Toast 'DashLauncher restarted. Modules were read again.' }
 })
 
 $form.add_FormClosing({
     $timer.Stop()
     if ($script:CatalogJob) { try { $script:CatalogJob.Ps.Stop(); $script:CatalogJob.Ps.Dispose() } catch { } }
+    if ($script:ModJob) { try { $script:ModJob.Ps.Stop(); $script:ModJob.Ps.Dispose() } catch { } }
+    # a module update in progress is left to finish (it rolls back on its own if it fails)
     try { if ($script:UpdProc -and -not $script:UpdProc.HasExited) { $script:UpdProc.Kill() } } catch { }
     try { if ($script:InstallProc -and -not $script:InstallProc.HasExited) { $script:InstallProc.Kill() } } catch { }
     foreach ($t in @($script:Tabs)) {

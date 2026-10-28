@@ -73,7 +73,8 @@ body.rail { background: var(--rail); overflow: hidden; user-select: none; }
 .rail-ver.has-update::after { content: ""; position: absolute; top: 1px; right: 0; width: 6px; height: 6px; border-radius: 50%; background: var(--accent2); }
 
 /* ------------------------------------------------------------ notice page */
-body.panel { background: var(--bg); display: grid; place-items: center; padding: 32px; overflow: auto; }
+body.panel { background: var(--bg); display: flex; flex-direction: column; padding: 32px; overflow: auto; }
+body.panel > .card { margin: auto; }   /* centred when it fits; starts at the top and scrolls when it does not */
 .card { width: min(560px, 100%); background: var(--surface); border: 1px solid var(--line); border-radius: 16px; box-shadow: var(--shadow); padding: 28px 30px; }
 .card-head { display: flex; align-items: center; gap: 14px; margin-bottom: 10px; }
 .card-icon { width: 44px; height: 44px; flex: none; border-radius: 12px; display: grid; place-items: center; background: var(--surface2); color: var(--muted); }
@@ -113,3 +114,15 @@ body.panel { background: var(--bg); display: grid; place-items: center; padding:
 @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: .35; } }
 @keyframes spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { .badge.live, .ring.spin { animation: none; } }
+.mods h2 { font-size: 15px; font-weight: 650; margin: 18px 0 0; }
+.mod-list { margin-top: 12px; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+.mod { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 12px; padding: 10px 14px; border-top: 1px solid var(--line); font-size: 13px; }
+.mod-list > .mod:first-child { border-top: 0; }
+.mod input { accent-color: var(--accent2); width: 16px; height: 16px; }
+.mod-name { font-weight: 600; color: var(--text); display: flex; flex-direction: column; }
+.mod-name small { font-weight: 400; color: var(--muted); font-size: 12px; }
+.mod-ver { color: var(--muted); text-align: right; font-variant-numeric: tabular-nums; }
+.mod.has-update .mod-ver strong { color: var(--accent2); }
+.card .mod-note { margin: 0; padding: 0 14px 10px 42px; font-size: 12px; color: var(--warn); }
+.btn:disabled { opacity: .55; cursor: default; }
+.check + .check { border-top: 0; margin-top: 8px; padding-top: 0; }

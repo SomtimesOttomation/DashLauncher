@@ -7,8 +7,12 @@
     tricks and oversized archives) into a temporary folder inside modules, checks its dash.json passes the launcher's
     rules and has the expected id, then renames the folder into place. An existing folder is never replaced.
     Only https links on github.com for the given repo are accepted.
+    With -UpdateFolder it updates an installed module instead: the same download and checks, then the package's files
+    are copied over that folder after backing up what they replace. Its lib\ and update\ folders and anything else not in
+    the package are kept (a dash keeps its settings and cache outside its folder). Leftover files the new version no
+    longer has are removed only inside folders the package itself has. If anything fails, the backup is put back.
     Progress lines on stdout:  ##PROGRESS <pct>|<text>
-    Result: a JSON file (UTF-8, no BOM): { status: 'installed' | 'error', id, folder, version, error }.
+    Result: a JSON file (UTF-8, no BOM): { status: 'installed' | 'updated' | 'error', id, folder, version, from, error }.
 #>
 param(
     [Parameter(Mandatory)][string]$Id,
@@ -18,9 +22,11 @@ param(
     [Parameter(Mandatory)][string]$ModulesDir,
     [Parameter(Mandatory)][string]$ResultFile,
     [string]$FolderName = '',
+    [string]$UpdateFolder = '',            # update this installed module in place instead of installing a new one
     [long]$MaxZipBytes = 100MB,
     [long]$MaxUnpackedBytes = 300MB,
-    [switch]$AllowLocalTestUrls            # test hook: lets the test suite serve files from 127.0.0.1
+    [switch]$AllowLocalTestUrls,           # test hook: lets the test suite serve files from 127.0.0.1
+    [switch]$TestFailAfterCopy             # test hook: fails an update after its files are copied, to test the rollback
 )
 
 $ErrorActionPreference = 'Stop'
@@ -30,6 +36,50 @@ Import-Module (Join-Path $PSScriptRoot 'core\Launcher.Manifest.psm1') -Force
 $utf8 = New-Object System.Text.UTF8Encoding($false)
 $staging = $null
 $zipPath = $null
+$skipTop = 'lib', 'update', '.git'      # a module's own top-level folders that an update never backs up, overwrites or deletes
+
+function Get-RelFiles {
+    param([string]$Dir)
+    $r = [IO.Path]::GetFullPath($Dir).TrimEnd('\', '/') + [IO.Path]::DirectorySeparatorChar
+    foreach ($f in @(Get-ChildItem -LiteralPath $Dir -Recurse -File -Force)) {
+        $rel = $f.FullName.Substring($r.Length)
+        if ($skipTop -contains ($rel -split '[\\/]')[0].ToLowerInvariant()) { continue }
+        $rel
+    }
+}
+function Copy-Rel {
+    param([string]$From, [string]$To, [string]$Rel)
+    $dst = Join-Path $To $Rel
+    $dir = Split-Path $dst
+    if (-not (Test-Path -LiteralPath $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
+    Copy-Item -LiteralPath (Join-Path $From $Rel) -Destination $dst -Force
+}
+function Update-InPlace {
+    # Copies the checked package over the installed folder; puts the backup back if anything goes wrong.
+    param([string]$Package, [string]$Target, [string]$Backup, [string]$Expect)
+    $new = @(Get-RelFiles $Package)
+    $old = @(Get-RelFiles $Target)
+    $newTops = @($new | Where-Object { $_ -match '[\\/]' } | ForEach-Object { ($_ -split '[\\/]')[0].ToLowerInvariant() } | Select-Object -Unique)
+    if (Test-Path -LiteralPath $Backup) { Remove-Item -LiteralPath $Backup -Recurse -Force }
+    New-Item -ItemType Directory -Path $Backup -Force | Out-Null
+    foreach ($rel in $old) { Copy-Rel $Target $Backup $rel }
+    try {
+        foreach ($rel in $new) { Copy-Rel $Package $Target $rel }
+        foreach ($rel in $old) {
+            if ($new -contains $rel -or $rel -notmatch '[\\/]') { continue }
+            if ($newTops -contains ($rel -split '[\\/]')[0].ToLowerInvariant()) { Remove-Item -LiteralPath (Join-Path $Target $rel) -Force -ErrorAction SilentlyContinue }
+        }
+        if ($TestFailAfterCopy) { throw 'Test failure after copying.' }
+        $check = Read-DashManifest -Folder $Target
+        if (-not $check.Ok -or $check.Id -cne $Id -or $check.Version -ne $Expect) { throw "The updated module did not check out ($($check.Reason)). The previous version was put back." }
+    } catch {
+        foreach ($rel in $new) { if ($old -notcontains $rel) { Remove-Item -LiteralPath (Join-Path $Target $rel) -Force -ErrorAction SilentlyContinue } }
+        foreach ($rel in $old) { Copy-Rel $Backup $Target $rel }
+        Remove-Item -LiteralPath $Backup -Recurse -Force -ErrorAction SilentlyContinue
+        throw
+    }
+    Remove-Item -LiteralPath $Backup -Recurse -Force -ErrorAction SilentlyContinue
+}
 
 function Set-Progress { param([int]$Pct, [string]$Text) Write-Output ("##PROGRESS {0}|{1}" -f $Pct, $Text) }
 function Write-Result {
@@ -99,17 +149,26 @@ try {
     if ($Id -cnotmatch '^[a-z][a-z0-9]{1,19}$') { throw 'Bad module id.' }
     if ($Repo -notmatch '^[A-Za-z0-9-]+/[A-Za-z0-9._-]+$') { throw 'Bad repo name.' }
     if (-not (Test-AllowedUrl $ZipUrl) -or -not (Test-AllowedUrl $ShaUrl)) { throw "Refusing a download link that is not this module's GitHub release." }
-    if (-not $FolderName) { $FolderName = ($Repo -split '/')[1] }
-    if ($FolderName -notmatch '^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$') { throw 'Bad folder name.' }
-    if (-not (Test-Path -LiteralPath $ModulesDir -PathType Container)) { New-Item -ItemType Directory -Path $ModulesDir -Force | Out-Null }
-    $target = Join-Path $ModulesDir $FolderName
-    if (Test-Path -LiteralPath $target) {
-        if (@(Get-ChildItem -LiteralPath $target -Force -ErrorAction SilentlyContinue).Count) { throw "There is already a folder named $FolderName in the modules folder, so nothing was installed. Remove or rename it, then try again." }
-        Remove-Item -LiteralPath $target -Force
+    $fromVersion = ''
+    if ($UpdateFolder) {
+        $target = [IO.Path]::GetFullPath($UpdateFolder).TrimEnd('\', '/')
+        $have = Read-DashManifest -Folder $target
+        if (-not $have.Ok -or $have.Id -cne $Id) { throw "The installed folder is not the $Id module, so it was not updated." }
+        $fromVersion = $have.Version
+    } else {
+        if (-not $FolderName) { $FolderName = ($Repo -split '/')[1] }
+        if ($FolderName -notmatch '^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$') { throw 'Bad folder name.' }
+        if (-not (Test-Path -LiteralPath $ModulesDir -PathType Container)) { New-Item -ItemType Directory -Path $ModulesDir -Force | Out-Null }
+        $target = Join-Path $ModulesDir $FolderName
+        if (Test-Path -LiteralPath $target) {
+            if (@(Get-ChildItem -LiteralPath $target -Force -ErrorAction SilentlyContinue).Count) { throw "There is already a folder named $FolderName in the modules folder, so nothing was installed. Remove or rename it, then try again." }
+            Remove-Item -LiteralPath $target -Force
+        }
     }
 
     # download into a temporary folder inside modules, so the final step is a rename on the same drive
-    $staging = Join-Path $ModulesDir ('.installing-' + $Id)
+    if (-not (Test-Path -LiteralPath $ModulesDir -PathType Container)) { New-Item -ItemType Directory -Path $ModulesDir -Force | Out-Null }
+    $staging = Join-Path $ModulesDir ($(if ($UpdateFolder) { '.updating-' } else { '.installing-' }) + $Id)
     if (Test-Path -LiteralPath $staging) { Remove-Item -LiteralPath $staging -Recurse -Force }
     New-Item -ItemType Directory -Path $staging -Force | Out-Null
     $zipPath = Join-Path $staging 'package.zip'
@@ -149,6 +208,14 @@ try {
         if ($errs -and $errs.Count) { throw "The module package has a damaged script ($($f.Name)). Nothing was installed." }
     }
 
+    if ($UpdateFolder) {
+        Set-Progress 95 'Replacing the files...'
+        Update-InPlace -Package $root -Target $target -Backup (Join-Path $ModulesDir ('.backup-' + $Id)) -Expect $info.Version
+        Remove-Item -LiteralPath $staging -Recurse -Force -ErrorAction SilentlyContinue
+        Set-Progress 100 'Updated'
+        Write-Result @{ status = 'updated'; id = $Id; folder = $target; version = $info.Version; from = $fromVersion }
+        exit 0
+    }
     Set-Progress 97 'Putting it in place...'
     Move-Item -LiteralPath $root -Destination $target
     Remove-Item -LiteralPath $staging -Recurse -Force -ErrorAction SilentlyContinue
