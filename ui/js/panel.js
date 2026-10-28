@@ -33,6 +33,58 @@ function notesHtml(md) {
   return out.join('');
 }
 
+const unticked = new Set();              // modules the person unticked on the update page (all updatable ones start ticked)
+
+function modVersionText(it) {
+  switch (it.state) {
+    case 'update': return `v${esc(it.current)} &rarr; <strong>v${esc(it.latest)}</strong>`;
+    case 'current': return `v${esc(it.current)}, up to date`;
+    case 'ahead': return `v${esc(it.current)}, newer than the latest release (v${esc(it.latest)})`;
+    case 'nopackage': return `v${esc(it.current)}, v${esc(it.latest)} has no update package yet`;
+    case 'none': return `v${esc(it.current)}, no release on GitHub yet`;
+    case 'error': return `v${esc(it.current)}, couldn't check`;
+    case 'notlisted': return `v${esc(it.current)}`;
+    default: return `v${esc(it.current)}, not checked yet`;
+  }
+}
+
+function modulesHtml(n) {
+  const m = n.modules || {};
+  let h = `<label class="check"><input type="checkbox" data-act="mauto" ${m.enabled ? 'checked' : ''}> Also check my dashboard modules for updates</label>`;
+  if (!m.enabled) return h;
+  const items = m.items || [];
+  const run = m.run || {};
+  const busy = run.status === 'updating' || run.status === 'restarting';
+  h += '<section class="mods"><h2>Dashboard modules</h2>';
+  if (busy) {
+    const cur = items.find((i) => i.id === run.current);
+    const text = run.status === 'restarting' ? 'Restarting DashLauncher with the new versions...'
+      : `Updating ${esc(cur ? cur.name : '')} (${run.index} of ${run.total})${run.text ? `: ${esc(run.text)}` : ''}`;
+    h += `<div class="progress"><div style="width:${run.status === 'restarting' ? 100 : Math.max(2, run.pct || 0)}%"></div></div><p class="note">${text}</p>`;
+  } else if (m.checking) {
+    h += '<div class="progress"><div style="width:30%"></div></div><p class="note">Asking GitHub for the latest module releases...</p>';
+  }
+  if (!items.length) h += '<p>No dashboard modules are installed.</p>';
+  else {
+    h += '<div class="mod-list">' + items.map((it) => {
+      const can = it.state === 'update' && !busy;
+      return `<label class="mod ${it.state === 'update' ? 'has-update' : ''}">
+        <input type="checkbox" data-mod="${esc(it.id)}" ${it.state === 'update' && !unticked.has(it.id) ? 'checked' : ''} ${can ? '' : 'disabled'}>
+        <span class="mod-name">${esc(it.name)}<small>${esc(it.title || '')}</small></span>
+        <span class="mod-ver">${modVersionText(it)}</span></label>` +
+        (it.note ? `<p class="mod-note">${esc(it.note)}</p>` : '');
+    }).join('') + '</div>';
+  }
+  const count = items.filter((i) => i.state === 'update' && !unticked.has(i.id)).length;
+  const any = items.some((i) => i.state === 'update');
+  h += `<div class="actions">` +
+    (any ? `<button class="btn primary" data-act="mupdate" ${count && !busy ? '' : 'disabled'}>Update selected (${count})</button>` : '') +
+    `<button class="btn" data-act="mcheck" ${busy || m.checking ? 'disabled' : ''}>Check again</button></div>`;
+  if (any) h += '<p class="note">DashLauncher closes the chosen dashboards, updates them from GitHub (checksum checked, old files backed up and put back if anything fails), then restarts on the same tab. Their settings and data are kept.</p>';
+  if (m.checkedAt) h += `<p class="note">Last checked ${esc(new Date(m.checkedAt).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' }))}.</p>`;
+  return h + '</section>';
+}
+
 function updateHtml(n) {
   const u = n.update || {};
   const when = u.published ? new Date(u.published).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' }) : '';
@@ -75,7 +127,8 @@ function updateHtml(n) {
       body = head('download', 'info', 'Checking for updates') + `<div class="progress"><div style="width:30%"></div></div><p class="note">${esc(u.text || 'Asking GitHub for the latest release...')}</p>`;
   }
   return `<button class="back" data-act="uclose">&larr; Back</button>` + body +
-    `<label class="check"><input type="checkbox" data-act="uauto" ${n.updateCheck ? 'checked' : ''}> Check for updates when DashLauncher starts (at most once a day)</label>`;
+    `<label class="check"><input type="checkbox" data-act="uauto" ${n.updateCheck ? 'checked' : ''}> Check for updates when DashLauncher starts (at most once a day)</label>` +
+    modulesHtml(n);
 }
 
 function render(n) {
@@ -166,9 +219,29 @@ function render(n) {
 }
 
 root.addEventListener('click', async (e) => {
+  const box = e.target.closest('input[data-mod]');
+  if (box) {
+    if (box.checked) unticked.delete(box.dataset.mod); else unticked.add(box.dataset.mod);
+    render(current);
+    return;
+  }
   const b = e.target.closest('[data-act]');
   if (!b) return;
   if (b.dataset.act === 'uauto') { bridge.request('update.auto', { on: b.checked }).catch(() => {}); return; }   // let the box tick
+  if (b.dataset.act === 'mauto') {
+    if (current && current.kind === 'update') current = { ...current, modules: { ...(current.modules || {}), enabled: b.checked } };
+    bridge.request('mod.auto', { on: b.checked }).catch(() => {});
+    render(current);
+    return;
+  }
+  if (b.dataset.act === 'mupdate' || b.dataset.act === 'mcheck') {
+    e.preventDefault();
+    b.disabled = true;
+    const items = (current && current.modules && current.modules.items) || [];
+    const ids = items.filter((i) => i.state === 'update' && !unticked.has(i.id)).map((i) => i.id);
+    try { await bridge.request(b.dataset.act === 'mupdate' ? 'mod.update' : 'mod.check', { ids }, 600000); } catch (err) { console.warn(err.message); }
+    return;                               // the host pushes the new state
+  }
   const id = root.dataset.id;
   e.preventDefault();
   const cmd = { install: 'catalog.install', uclose: 'update.close', ucheck: 'update.check', ustage: 'update.stage', ucancel: 'update.cancel', uapply: 'update.apply', reload: 'tab.reload', close: 'tab.close', retry: 'tab.retry', approve: 'tab.approve', switch: 'tab.switchTo', download: 'catalog.download', page: 'catalog.download', folder: 'modules.open', refresh: 'modules.scan' }[b.dataset.act];
@@ -195,6 +268,7 @@ root.addEventListener('click', async (e) => {
 bridge.on('notice', render);
 bridge.on('install', (st) => { if (current && current.kind === 'available' && current.id === st.id && st.status !== 'installed') render({ ...current, install: st }); });
 bridge.on('update', (u) => { if (current && current.kind === 'update') render({ ...current, update: u }); });
+bridge.on('modules', (m) => { if (current && current.kind === 'update') render({ ...current, modules: m }); });
 bridge.on('theme', (d) => bridge.setTheme(d && d.theme));
 
 (async () => {

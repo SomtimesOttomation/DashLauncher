@@ -4,6 +4,13 @@ Changes are grouped by label: Feature, Bug/Fix, Redesign, Housekeeping. Every me
 
 ## Unreleased
 
+**Feature**
+- Update dashboard modules from the launcher's update page: an "Also check my dashboard modules for updates" box (off by default) lists each installed module's version and any update, and you tick which ones to update. DashLauncher updates them with a checked download, backup and rollback, then restarts on the same tab.
+
+**Housekeeping**
+- Contract: how a launcher-run module update works, and a checklist line that a dash keeps its settings and data outside its folder.
+- The update and notice pages scroll when the window is too short for them.
+
 ## Released
 
 ### v0.4.1

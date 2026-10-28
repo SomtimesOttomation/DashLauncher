@@ -47,6 +47,13 @@ Updating downloads the release zip, checks it against its published checksum, th
 files and reopens it. If the new version does not start, the old one is restored. Updates never touch the `modules`
 folder, `lib\` or your settings; each dashboard module keeps its own updater.
 
+**Dashboard modules too (optional, off by default):** tick "Also check my dashboard modules for updates" on the update
+page. DashLauncher then also asks GitHub about every installed module in its list (when the page opens, at start with the
+daily check, or with Check again), shows each one's version, and puts an arrow on the tabs that have an update. Tick the
+ones you want and press **Update selected**: DashLauncher closes those dashboards, downloads and checks each update,
+replaces their files (backing up the old ones and putting them back if anything fails), and restarts on the same tab.
+A dashboard's settings and data are kept. A module that is open in its own window is skipped until you close that window.
+
 ## Sample module
 
 `samples\SampleDash` is a dashboard module that contacts nothing. Copy it into `modules` to try the launcher offline:
