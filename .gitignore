@@ -10,5 +10,8 @@ Thumbs.db
 # dashboard modules are installed by the person, not part of this repo
 modules/*
 !modules/README.md
+# drop-in update zips are the person's own files
+updates/*
+!updates/README.md
 # the Sample's WebView2 DLLs when run on its own
 samples/*/lib/

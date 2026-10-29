@@ -68,6 +68,7 @@ if (-not $created) {
 
 Import-Module (Join-Path $Root 'core\Launcher.Manifest.psm1') -Force
 Import-Module (Join-Path $Root 'core\Launcher.Catalog.psm1') -Force
+Import-Module (Join-Path $Root 'core\Launcher.DropIn.psm1') -Force
 $script:Utf8 = New-Object System.Text.UTF8Encoding($false)
 $script:Required = @('Initialize-Dash', 'Start-DashWorker', 'Suspend-DashWorker', 'Invoke-DashCommand', 'Receive-DashEvents', 'Get-DashStatus', 'Stop-DashTraffic', 'Stop-Dash')
 
@@ -191,13 +192,14 @@ $staged = Read-UpdateJson 'staged.json'
 if ($staged -and [string]$staged.from -eq $Version -and (Test-Path (Join-Path $script:UpdDir 'stage\Start-DashLauncher.ps1'))) { $script:Upd.status = 'staged'; $script:Upd.latest = [string]$staged.version; $script:Upd.installable = $true }
 
 function Start-Updater {
-    param([ValidateSet('Check', 'Stage')][string]$Action)
+    param([ValidateSet('Check', 'Stage', 'StageZip')][string]$Action, [string]$ZipPath = '')
     if ($script:UpdProc -and -not $script:UpdProc.HasExited) { return $false }
     $cur = if ($env:DASHLAUNCHER_FAKE_VERSION) { $env:DASHLAUNCHER_FAKE_VERSION } else { $Version }     # test hook
     Remove-Item $script:UpdResultPath -Force -ErrorAction SilentlyContinue
     $argsList = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', ('"{0}"' -f (Join-Path $Root 'Update-DashLauncher.ps1')),
                   '-Action', $Action, '-CurrentVersion', $cur, '-WorkDir', ('"{0}"' -f $script:UpdDir))
     if ($env:DASHLAUNCHER_UPDATE_API) { $argsList += @('-ApiBase', $env:DASHLAUNCHER_UPDATE_API) }      # test hook
+    if ($ZipPath) { $argsList += @('-ZipPath', ('"{0}"' -f $ZipPath)) }
     $script:UpdAction = $Action
     $script:UpdProc = Start-Process -FilePath 'powershell.exe' -ArgumentList $argsList -WindowStyle Hidden -PassThru -RedirectStandardOutput $script:UpdOut
     $script:Upd.status = $(if ($Action -eq 'Check') { 'checking' } else { 'downloading' })
@@ -235,6 +237,20 @@ function Watch-Updater {
     $was = $script:Upd.status
     Set-UpdateFromResult $res
     Send-UpdateState
+    $d = $script:DropApply
+    if ($d -and $d.Kind -eq 'launcher') {
+        # a DashLauncher package from the updates folder: install it straight away, as the person already said Apply
+        $script:DropApply = $null
+        if ($script:Upd.status -eq 'staged') {
+            Move-DropDone $d.Path
+            $err = Install-StagedUpdate
+            if (-not $err) { $form.Close(); return }
+            Show-Toast ("The DashLauncher package was not applied: {0}" -f $err)
+        } else {
+            Show-Toast ("The DashLauncher package was not applied: {0}" -f $script:Upd.error)
+        }
+        return
+    }
     if ($script:Upd.status -eq 'available' -and $was -eq 'checking' -and -not $script:PanelOverride) { Show-Toast ("DashLauncher v{0} is available. Click the version at the bottom of the tab rail." -f $script:Upd.latest) }
 }
 function Start-UpdateCheckIfDue {
@@ -292,7 +308,7 @@ function Confirm-UpdateStarted {
 $script:InstallProc = $null
 $script:InstallOut = Join-Path $script:DataDir 'install.out'
 $script:InstallResult = Join-Path $script:DataDir 'install-result.json'
-$script:Install = @{ id = ''; status = 'idle'; pct = 0; text = ''; error = '' }
+$script:Install = @{ id = ''; status = 'idle'; pct = 0; text = ''; error = ''; zip = '' }
 $script:LastInstallJson = ''
 function Send-InstallState {
     $json = ConvertTo-Json -InputObject @{ event = 'install'; data = $script:Install } -Depth 3 -Compress
@@ -310,6 +326,18 @@ function Start-ModuleInstall {
                   '-ModulesDir', ('"{0}"' -f $script:ModulesDir), '-ResultFile', ('"{0}"' -f $script:InstallResult))
     $script:InstallProc = Start-Process -FilePath 'powershell.exe' -ArgumentList $argsList -WindowStyle Hidden -PassThru -RedirectStandardOutput $script:InstallOut
     $script:Install = @{ id = $Tab.Id; status = 'installing'; pct = 0; text = 'Starting...'; error = '' }
+    Send-InstallState
+    return ''
+}
+function Start-ModuleInstallFromZip {
+    # a module that is not installed yet, from a zip in the updates folder
+    param([string]$Id, [string]$Zip)
+    if ($script:InstallProc -and -not $script:InstallProc.HasExited) { return 'Another module is installing. Wait for it to finish.' }
+    Remove-Item $script:InstallResult -Force -ErrorAction SilentlyContinue
+    $argsList = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', ('"{0}"' -f (Join-Path $Root 'Install-DashModule.ps1')),
+                  '-Id', $Id, '-ZipPath', ('"{0}"' -f $Zip), '-ModulesDir', ('"{0}"' -f $script:ModulesDir), '-ResultFile', ('"{0}"' -f $script:InstallResult))
+    $script:InstallProc = Start-Process -FilePath 'powershell.exe' -ArgumentList $argsList -WindowStyle Hidden -PassThru -RedirectStandardOutput $script:InstallOut
+    $script:Install = @{ id = $Id; status = 'installing'; pct = 0; text = 'Starting...'; error = ''; zip = $Zip }
     Send-InstallState
     return ''
 }
@@ -333,14 +361,16 @@ function Watch-Install {
     $id = $script:Install.id
     $name = $(if ($script:ById.ContainsKey($id)) { $script:ById[$id].Name } else { $id })
     if ($res -and [string]$res.status -eq 'installed') {
-        $script:Install = @{ id = $id; status = 'installed'; pct = 100; text = 'Installed'; error = '' }
+        if ($script:Install.zip) { Move-DropDone $script:Install.zip }
+        $script:Install = @{ id = $id; status = 'installed'; pct = 100; text = 'Installed'; error = ''; zip = '' }
         Send-InstallState
         Show-Toast ("{0} is installed." -f $name)
         [void](Invoke-Rescan)
         if ($script:ById.ContainsKey($id) -and $script:Active -ne $id) { $script:Active = ''; Select-Tab $id }
     } else {
         $why = $(if ($res -and $res.error) { [string]$res.error } else { 'The installer ended without an answer.' })
-        $script:Install = @{ id = $id; status = 'error'; pct = 0; text = ''; error = $why }
+        if ($script:Install.zip) { Show-Toast ("{0} was not installed: {1}" -f $name, $why) }
+        $script:Install = @{ id = $id; status = 'error'; pct = 0; text = ''; error = $why; zip = '' }
         Send-InstallState
         if ($script:Active -eq $id) { Show-Notice }
     }
@@ -488,13 +518,15 @@ function Complete-ModuleUpdateStart {
 function Start-NextModuleUpdate {
     $run = $script:ModRun
     while (@($run.queue).Count) {
-        $id = [string]@($run.queue)[0]
+        $q = @($run.queue)[0]
         $run.queue = @($run.queue | Select-Object -Skip 1)
         $run.index++
+        $zip = ''
+        if ($q -is [hashtable]) { $id = [string]$q.id; $zip = [string]$q.zip } else { $id = [string]$q }
         $t = $script:ById[$id]
         $entry = Get-CatalogEntry $id
-        $rel = $(if ($entry) { Get-ModuleRelease $entry } else { $null })
-        if (-not $t -or -not $t.Info -or -not $rel) { $run.results[$id] = @{ ok = $false; error = 'It is no longer installed.' }; continue }
+        $rel = $(if ($entry -and -not $zip) { Get-ModuleRelease $entry } else { $null })
+        if (-not $t -or -not $t.Info -or (-not $rel -and -not $zip)) { $run.results[$id] = @{ ok = $false; error = 'It is no longer installed.' }; continue }
         $folder = $t.Info.Folder
         Close-Tab $t                                   # stops it and releases its host lock
         $m = $null
@@ -504,10 +536,11 @@ function Start-NextModuleUpdate {
             continue
         }
         Remove-Item $script:ModResultPath -Force -ErrorAction SilentlyContinue
-        $argsList = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', ('"{0}"' -f (Join-Path $Root 'Install-DashModule.ps1')),
-                      '-Id', $id, '-Repo', $entry.Repo, '-ZipUrl', ('"{0}"' -f $rel.Res.Asset), '-ShaUrl', ('"{0}"' -f $rel.Res.Sha),
-                      '-ModulesDir', ('"{0}"' -f $script:ModulesDir), '-UpdateFolder', ('"{0}"' -f $folder), '-ResultFile', ('"{0}"' -f $script:ModResultPath))
-        $run.current = $id; $run.pct = 0; $run.text = 'Starting...'
+        $argsList = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', ('"{0}"' -f (Join-Path $Root 'Install-DashModule.ps1')), '-Id', $id)
+        if ($zip) { $argsList += @('-ZipPath', ('"{0}"' -f $zip)) }
+        else { $argsList += @('-Repo', $entry.Repo, '-ZipUrl', ('"{0}"' -f $rel.Res.Asset), '-ShaUrl', ('"{0}"' -f $rel.Res.Sha)) }
+        $argsList += @('-ModulesDir', ('"{0}"' -f $script:ModulesDir), '-UpdateFolder', ('"{0}"' -f $folder), '-ResultFile', ('"{0}"' -f $script:ModResultPath))
+        $run.current = $id; $run.currentZip = $zip; $run.pct = 0; $run.text = 'Starting...'
         $script:ModProc = Start-Process -FilePath 'powershell.exe' -ArgumentList $argsList -WindowStyle Hidden -PassThru -RedirectStandardOutput $script:ModOut
         Send-ModuleUpdateState
         Push-RailState
@@ -530,7 +563,10 @@ function Watch-ModuleUpdate {
     $script:ModProc = $null
     $res = $null
     try { $res = Get-Content $script:ModResultPath -Raw | ConvertFrom-Json } catch { }
-    if ($res -and [string]$res.status -eq 'updated') { $run.results[$run.current] = @{ ok = $true; from = [string]$res.from; to = [string]$res.version }; $run.ok++ }
+    if ($res -and [string]$res.status -eq 'updated') {
+        $run.results[$run.current] = @{ ok = $true; from = [string]$res.from; to = [string]$res.version }; $run.ok++
+        if ($run.currentZip) { Move-DropDone $run.currentZip }
+    }
     else { $run.results[$run.current] = @{ ok = $false; error = $(if ($res -and $res.error) { [string]$res.error } else { 'The updater ended without an answer.' }) } }
     $run.current = ''
     Start-NextModuleUpdate
@@ -564,6 +600,105 @@ function Show-ModuleUpdateResult {
     if ($bad.Count) { $text = ($text + ' ' + ($bad -join ' ')).Trim() }
     Show-Toast $text
     return $true
+}
+
+# ---------------------------------------------------------------- drop-in updates: the updates folder
+# A DashLauncher or dashboard module zip dropped into <launcher>\updates is noticed within about 5 seconds (one folder
+# listing; a zip is opened only once, after its size and time have stayed the same for 5 seconds so it is fully copied).
+# If it is newer than what is installed, a prompt at the bottom right asks to apply it, and Apply runs the usual update:
+# DashLauncher stages it, swaps its files and restarts; a module is updated in place (backup and rollback) and DashLauncher
+# restarts, or a module that is not installed yet is installed. An applied zip is moved to updates\applied.
+# Not now leaves the zip where it is; DashLauncher asks again the next time it starts.
+$script:DropDir = Join-Path $Root 'updates'
+try { if (-not (Test-Path $script:DropDir)) { New-Item -ItemType Directory -Path $script:DropDir -Force | Out-Null } } catch { }
+$script:DropSeen = @{}           # path -> size|time already handled this run
+$script:DropPending = @{}        # path -> size|time seen once; acted on when unchanged at the next look
+$script:DropAsk = $null          # the package being asked about
+$script:DropApply = $null        # the DashLauncher package being staged
+
+function Move-DropDone {
+    # an applied package goes to updates\applied, with its .sha256 if it had one
+    param([string]$Path)
+    try {
+        $done = Join-Path $script:DropDir 'applied'
+        if (-not (Test-Path $done)) { New-Item -ItemType Directory -Path $done -Force | Out-Null }
+        $dest = Join-Path $done ([IO.Path]::GetFileName($Path))
+        if (Test-Path -LiteralPath $dest) { $dest = Join-Path $done ('{0}-{1}{2}' -f [IO.Path]::GetFileNameWithoutExtension($Path), (Get-Date).ToString('yyyyMMdd-HHmmss'), [IO.Path]::GetExtension($Path)) }
+        Move-Item -LiteralPath $Path -Destination $dest -Force
+        if (Test-Path -LiteralPath "$Path.sha256") { Move-Item -LiteralPath "$Path.sha256" -Destination "$dest.sha256" -Force }
+    } catch { }
+}
+function Test-DropFolder {
+    <# Every 5 seconds from the timer. Cheap: one listing of the folder's top-level zip files. #>
+    if ($script:DropAsk -or $script:DropApply -or $script:PendingModUpd) { return }
+    if (@('updating', 'restarting') -contains $script:ModRun.status) { return }
+    if (($script:InstallProc -and -not $script:InstallProc.HasExited) -or ($script:UpdProc -and -not $script:UpdProc.HasExited)) { return }
+    $files = @()
+    try { $files = @((New-Object IO.DirectoryInfo($script:DropDir)).GetFiles('*.zip') | Sort-Object Name) } catch { return }
+    foreach ($f in $files) {
+        $sig = '{0}|{1}' -f $f.Length, $f.LastWriteTimeUtc.Ticks
+        if ($script:DropSeen[$f.FullName] -eq $sig) { continue }
+        if ($script:DropPending[$f.FullName] -ne $sig) { $script:DropPending[$f.FullName] = $sig; continue }     # still arriving, or just arrived
+        try { $fs = [IO.File]::Open($f.FullName, 'Open', 'Read', 'None'); $fs.Close() } catch { continue }       # something still has it open
+        $script:DropPending.Remove($f.FullName)
+        $script:DropSeen[$f.FullName] = $sig
+        $info = Get-DropInfo -Path $f.FullName
+        $ask = Resolve-Drop $f $info
+        if ($ask) { $script:DropAsk = $ask; Show-DropPrompt $ask.Text; return }
+    }
+}
+function Resolve-Drop {
+    # Returns what to ask about the package, or $null after a short message when there is nothing to apply.
+    param($File, $Info)
+    $n = $File.Name
+    if ($Info.Kind -eq 'unknown') { Show-Toast ("{0} in the updates folder was not used: {1}" -f $n, $Info.Reason); return $null }
+    $new = ConvertTo-DashVersion $Info.Version
+    if ($Info.Kind -eq 'launcher') {
+        $cur = ConvertTo-DashVersion $Version
+        if (-not ($new -gt $cur)) { Show-Toast ("{0} is DashLauncher v{1}, and you already have v{2}." -f $n, $Info.Version, $Version); return $null }
+        return @{ Kind = 'launcher'; Path = $File.FullName; Info = $Info
+                  Text = ("Update found: DashLauncher v{0} ({1}). Apply it now? DashLauncher restarts." -f $Info.Version, $n) }
+    }
+    $t = $script:ById[$Info.Id]
+    if ($t -and $t.Info -and $t.Info.Ok -and @('broken', 'available') -notcontains $t.State) {
+        $cur = ConvertTo-DashVersion $t.Info.Version
+        if (-not ($new -gt $cur)) { Show-Toast ("{0} is {1} v{2}, and you already have v{3}." -f $n, $t.Name, $Info.Version, $t.Info.Version); return $null }
+        return @{ Kind = 'update'; Path = $File.FullName; Info = $Info
+                  Text = ("Update found: {0} v{1} (you have v{2}). Apply it now? DashLauncher restarts." -f $t.Name, $Info.Version, $t.Info.Version) }
+    }
+    $name = $(if ($Info.Name) { $Info.Name } else { $Info.Id })
+    return @{ Kind = 'install'; Path = $File.FullName; Info = $Info
+              Text = ("New dashboard found: {0} v{1} ({2}). Install it now?" -f $name, $Info.Version, $n) }
+}
+function Invoke-DropAnswer {
+    param([bool]$Apply)
+    $d = $script:DropAsk
+    $script:DropAsk = $null
+    Hide-DropPrompt
+    if (-not $d) { return }
+    if (-not $Apply) { Show-Toast 'Left in the updates folder. DashLauncher asks again the next time it starts.'; return }
+    if (-not (Test-Path -LiteralPath $d.Path)) { Show-Toast 'That package is no longer in the updates folder.'; return }
+    switch ($d.Kind) {
+        'launcher' {
+            $script:DropApply = $d
+            if (-not (Start-Updater 'StageZip' $d.Path)) { $script:DropApply = $null; Show-Toast 'An update check is running. Try again in a moment.'; return }
+            Show-Toast ("Checking the DashLauncher v{0} package..." -f $d.Info.Version)
+        }
+        'update' {
+            if ($script:ModRun.status -eq 'updating') { Show-Toast 'Wait for the current update to finish.'; return }
+            $t = $script:ById[$d.Info.Id]
+            if ($t -and $t.State -eq 'ready' -and $t.Status -and $t.Status.Syncing) {
+                if ([Windows.Forms.MessageBox]::Show("$($t.Name) is syncing.`n`nUpdating stops it. Update now?", $AppName, 'YesNo', 'Question') -ne 'Yes') { return }
+            }
+            $script:ModRun = @{ status = 'updating'; queue = @(@{ id = $d.Info.Id; zip = $d.Path }); total = 1; index = 0; current = ''; currentZip = ''; pct = 0; text = ''; results = @{}; ok = 0 }
+            Show-Toast ("Updating {0}..." -f $(if ($t) { $t.Name } else { $d.Info.Id }))
+            Start-NextModuleUpdate
+        }
+        'install' {
+            $err = Start-ModuleInstallFromZip $d.Info.Id $d.Path
+            if ($err) { Show-Toast $err } else { Show-Toast ("Installing {0}..." -f $(if ($d.Info.Name) { $d.Info.Name } else { $d.Info.Id })) }
+        }
+    }
 }
 
 # ---------------------------------------------------------------- tabs
@@ -738,8 +873,11 @@ function Set-ToastShape {
     $t.Region = New-Object Drawing.Region($path)
 }
 function Move-Toast {
+    # sits above the drop-in prompt while that is showing
     $t = $script:Toast
-    $t.Location = New-Object Drawing.Point(($content.ClientSize.Width - $t.Width - 18), ($content.ClientSize.Height - $t.Height - 18))
+    $bottom = $content.ClientSize.Height - 18
+    if ($script:Prompt -and $script:Prompt.Visible) { $bottom = $script:Prompt.Top - 10 }
+    $t.Location = New-Object Drawing.Point(($content.ClientSize.Width - $t.Width - 18), ($bottom - $t.Height))
 }
 function Test-DarkTheme {
     if ($script:Settings.theme -eq 'dark') { return $true }
@@ -779,6 +917,61 @@ function Show-Toast {
     $script:ToastTimer.Stop(); $script:ToastTimer.Start()
 }
 $script:Toast.add_SizeChanged({ Set-ToastShape; Move-Toast })
+
+# The drop-in prompt: like a toast, but it stays until Apply or Not now is pressed.
+$script:Prompt = New-Object Windows.Forms.Panel
+$script:Prompt.Size = New-Object Drawing.Size(380, 110)
+$script:Prompt.Anchor = 'Bottom, Right'
+$script:Prompt.Visible = $false
+$script:PromptText = New-Object Windows.Forms.Label
+$script:PromptText.Location = New-Object Drawing.Point(16, 14)
+$script:PromptText.Size = New-Object Drawing.Size(348, 44)
+$script:PromptText.Font = New-Object Drawing.Font('Segoe UI', 10)
+$script:PromptApply = New-Object Windows.Forms.Button
+$script:PromptLater = New-Object Windows.Forms.Button
+foreach ($pb in @($script:PromptApply, $script:PromptLater)) {
+    $pb.FlatStyle = 'Flat'; $pb.Font = New-Object Drawing.Font('Segoe UI Semibold', 9.5); $pb.Size = New-Object Drawing.Size(96, 30); $pb.Cursor = 'Hand'
+}
+$script:PromptApply.Text = 'Apply'
+$script:PromptLater.Text = 'Not now'
+$script:PromptApply.add_Click({ Invoke-DropAnswer $true })
+$script:PromptLater.add_Click({ Invoke-DropAnswer $false })
+$script:Prompt.Controls.AddRange(@($script:PromptText, $script:PromptApply, $script:PromptLater))
+$content.Controls.Add($script:Prompt)
+function Show-DropPrompt {
+    param([string]$Text)
+    $p = $script:Prompt
+    $dark = [bool](Test-DarkTheme)
+    $bg = $(if ($dark) { [Drawing.Color]::FromArgb(232, 236, 244) } else { [Drawing.Color]::FromArgb(19, 23, 34) })
+    $fg = $(if ($dark) { [Drawing.Color]::FromArgb(13, 16, 23) } else { [Drawing.Color]::FromArgb(244, 245, 248) })
+    $accent = $(if ($dark) { [Drawing.Color]::FromArgb(29, 66, 138) } else { [Drawing.Color]::FromArgb(110, 160, 255) })
+    $p.BackColor = $bg; $script:PromptText.ForeColor = $fg; $script:PromptText.Text = $Text
+    $sz = [Windows.Forms.TextRenderer]::MeasureText($Text, $script:PromptText.Font, (New-Object Drawing.Size(348, 0)), [Windows.Forms.TextFormatFlags]::WordBreak)
+    $script:PromptText.Height = [Math]::Max(20, $sz.Height)
+    $by = 14 + $script:PromptText.Height + 12
+    $script:PromptApply.Location = New-Object Drawing.Point(16, $by)
+    $script:PromptLater.Location = New-Object Drawing.Point(120, $by)
+    $script:PromptApply.BackColor = $accent; $script:PromptApply.ForeColor = $(if ($dark) { [Drawing.Color]::White } else { [Drawing.Color]::FromArgb(13, 16, 23) })
+    $script:PromptApply.FlatAppearance.BorderColor = $accent
+    $script:PromptLater.BackColor = $bg; $script:PromptLater.ForeColor = $fg; $script:PromptLater.FlatAppearance.BorderColor = $fg
+    $p.Height = $by + 30 + 14
+    $d = 20
+    $path = New-Object Drawing.Drawing2D.GraphicsPath
+    $path.AddArc(0, 0, $d, $d, 180, 90); $path.AddArc($p.Width - $d, 0, $d, $d, 270, 90)
+    $path.AddArc($p.Width - $d, $p.Height - $d, $d, $d, 0, 90); $path.AddArc(0, $p.Height - $d, $d, $d, 90, 90)
+    $path.CloseFigure()
+    $p.Region = New-Object Drawing.Region($path)
+    Move-Prompt
+    $p.Visible = $true
+    $p.BringToFront()
+    if ($script:Toast.Visible) { Move-Toast; $script:Toast.BringToFront() }
+}
+function Hide-DropPrompt { $script:Prompt.Visible = $false; if ($script:Toast.Visible) { Move-Toast } }
+function Move-Prompt {
+    $p = $script:Prompt
+    $p.Location = New-Object Drawing.Point(($content.ClientSize.Width - $p.Width - 18), ($content.ClientSize.Height - $p.Height - 18))
+}
+$content.add_Resize({ if ($script:Prompt.Visible) { Move-Prompt } })
 $content.add_Resize({ if ($script:Toast.Visible) { Move-Toast } })
 
 function Send-View {
@@ -828,6 +1021,7 @@ function Show-Notice {
     $script:Notice = Get-Notice
     $panelView.Visible = $true
     $panelView.BringToFront()
+    if ($script:Prompt.Visible) { $script:Prompt.BringToFront() }
     if ($script:Toast.Visible) { $script:Toast.BringToFront() }
     Send-Event $panelView 'notice' $script:Notice
 }
@@ -1037,6 +1231,7 @@ function Select-Tab {
         $panelView.Visible = $false
         $next.WebView.Visible = $true
         $next.WebView.BringToFront()
+        if ($script:Prompt.Visible) { $script:Prompt.BringToFront() }
         if ($script:Toast.Visible) { $script:Toast.BringToFront() }
         $form.Text = '{0} - {1}' -f $next.Info.Title, $AppName
     } else {
@@ -1393,6 +1588,7 @@ $timer.add_Tick({
     if ($script:InstallProc) { Watch-Install }
     if ($script:ModJob -and $script:ModJob.Handle.IsCompleted) { Complete-ModuleCheck }
     if ($script:ModProc) { Watch-ModuleUpdate }
+    if ($script:Tick % 20 -eq 10) { Test-DropFolder }                    # the updates folder, every 5 seconds
 })
 
 # ---------------------------------------------------------------- start and close

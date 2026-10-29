@@ -8,12 +8,16 @@
                     extracts it to <WorkDir>\stage (rejecting unsafe paths), syntax-checks the PowerShell files,
                     and writes <WorkDir>\staged.json. Nothing in the installed launcher is touched here.
                     A package that contains a modules folder is refused: updates never touch dashboard modules.
+    -Action StageZip : the same as Stage, but from a zip the person dropped into the updates folder (-ZipPath) instead of
+                    GitHub. If <zip>.sha256 sits beside it, the zip must match it. Files may sit at the zip's root or
+                    inside one top folder. The package must be newer than this copy.
     Progress lines on stdout:  ##PROGRESS <pct>|<text>
     The result is a JSON file (UTF-8, no BOM): { status, current, latest, tag, notes, published, error, ... }.
     Only api.github.com and the release download hosts it redirects to are contacted.
 #>
 param(
-    [Parameter(Mandatory)][ValidateSet('Check', 'Stage')][string]$Action,
+    [Parameter(Mandatory)][ValidateSet('Check', 'Stage', 'StageZip')][string]$Action,
+    [string]$ZipPath = '',
     [Parameter(Mandatory)][string]$CurrentVersion,
     [Parameter(Mandatory)][string]$WorkDir,
     [string]$ResultFile = (Join-Path $WorkDir 'update-result.json'),
@@ -139,10 +143,69 @@ function Expand-Safe {
     } finally { $archive.Dispose() }
 }
 
+function Test-Stage {
+    # the same checks for a GitHub or a dropped package; returns the package version
+    param([string]$StageDir)
+    $vf = Join-Path $StageDir 'VERSION'
+    if (-not (Test-Path $vf)) { throw 'The update package has no VERSION file.' }
+    $pkgVer = ConvertTo-Ver ([IO.File]::ReadAllText($vf))
+    if (-not $pkgVer) { throw 'The update package has an unreadable VERSION file.' }
+    foreach ($must in 'Start-DashLauncher.ps1', 'Start-DashLauncher.bat', 'ui/rail.html', 'core/Launcher.Manifest.psm1') {
+        if (-not (Test-Path (Join-Path $StageDir $must))) { throw "The update package is missing $must." }
+    }
+    foreach ($f in @(Get-ChildItem -LiteralPath $StageDir -Recurse -File | Where-Object { @('.ps1', '.psm1') -contains $_.Extension.ToLowerInvariant() })) {
+        $errs = $null; $tokens = $null
+        [void][Management.Automation.Language.Parser]::ParseFile($f.FullName, [ref]$tokens, [ref]$errs)
+        if ($errs -and $errs.Count) { throw "The update package has a damaged script ($($f.Name)). Nothing was installed." }
+    }
+    return $pkgVer
+}
+
 try {
-    Set-Progress 2 'Asking GitHub for the latest release...'
     $cur = ConvertTo-Ver $CurrentVersion
     if (-not $cur) { throw "This copy has an unreadable version ('$CurrentVersion')." }
+    if ($Action -eq 'StageZip') {
+        # ---- a package dropped into the updates folder ------------------------------------------------------
+        if (-not $ZipPath -or -not (Test-Path -LiteralPath $ZipPath -PathType Leaf)) { throw 'The dropped update package is no longer there.' }
+        if ((Get-Item -LiteralPath $ZipPath).Length -gt $MaxZipBytes) { throw 'The dropped update package is larger than expected.' }
+        $stageDir = Join-Path $WorkDir 'stage'
+        $stagedJson = Join-Path $WorkDir 'staged.json'
+        $pkg = Join-Path $WorkDir 'dropped.zip'
+        Remove-Item $stagedJson, $pkg -Force -ErrorAction SilentlyContinue
+        if (Test-Path $stageDir) { Remove-Item $stageDir -Recurse -Force }
+        Set-Progress 10 'Copying the package...'
+        Copy-Item -LiteralPath $ZipPath -Destination $pkg -Force
+        $sumFile = "$ZipPath.sha256"
+        if (Test-Path -LiteralPath $sumFile) {
+            Set-Progress 30 'Checking it against its checksum...'
+            $line = ([IO.File]::ReadAllText($sumFile)).Trim()
+            if ($line -notmatch '^([0-9a-fA-F]{64})\b') { throw 'The .sha256 file beside the package is not in the expected format.' }
+            if ((Get-FileHash -Path $pkg -Algorithm SHA256).Hash.ToLowerInvariant() -ne $Matches[1].ToLowerInvariant()) { throw 'The package does not match the .sha256 file beside it. Nothing was installed.' }
+        }
+        Set-Progress 50 'Unpacking...'
+        $unpack = Join-Path $WorkDir 'unpack'
+        if (Test-Path $unpack) { Remove-Item $unpack -Recurse -Force }
+        New-Item -ItemType Directory -Path $unpack -Force | Out-Null
+        Expand-Safe $pkg $unpack
+        $root = $unpack
+        if (-not (Test-Path (Join-Path $unpack 'Start-DashLauncher.ps1'))) {
+            $dirs = @(Get-ChildItem -LiteralPath $unpack -Directory); $files = @(Get-ChildItem -LiteralPath $unpack -File)
+            if ($dirs.Count -eq 1 -and -not $files.Count) { $root = $dirs[0].FullName } else { throw 'The package has no Start-DashLauncher.ps1 at its root.' }
+        }
+        foreach ($blocked in 'modules', 'lib', 'update') { if (Test-Path (Join-Path $root $blocked)) { throw "The package contains a protected folder: $blocked" } }
+        Move-Item -LiteralPath $root -Destination $stageDir
+        Remove-Item $unpack -Recurse -Force -ErrorAction SilentlyContinue
+        Set-Progress 85 'Checking the new files...'
+        $pkgVer = Test-Stage $stageDir
+        if ($pkgVer -le $cur) { throw "The package is v$pkgVer, which is not newer than this copy (v$cur)." }
+        $staged = @{ version = "$pkgVer"; tag = "v$pkgVer"; stageDir = $stageDir; stagedAt = (Get-Date).ToString('o'); from = "$cur"; source = 'dropped' }
+        [IO.File]::WriteAllText($stagedJson, ($staged | ConvertTo-Json), $utf8)
+        Remove-Item $pkg -Force -ErrorAction SilentlyContinue
+        Set-Progress 100 'Ready to install'
+        Write-Result @{ status = 'staged'; current = "$cur"; latest = "$pkgVer"; tag = "v$pkgVer"; notes = ''; published = ''; htmlUrl = ''; checkedAt = (Get-Date).ToString('o'); source = 'dropped' }
+        exit 0
+    }
+    Set-Progress 2 'Asking GitHub for the latest release...'
     $latest = Get-Latest
     if ($latest.status -eq 'none') {
         Write-Result @{ status = 'none'; current = "$cur"; checkedAt = (Get-Date).ToString('o') }
@@ -194,18 +257,8 @@ try {
     Expand-Safe $zipPath $stageDir
 
     Set-Progress 92 'Checking the new files...'
-    $vf = Join-Path $stageDir 'VERSION'
-    if (-not (Test-Path $vf)) { throw 'The update package has no VERSION file.' }
-    $pkgVer = ConvertTo-Ver ([IO.File]::ReadAllText($vf))
-    if (-not $pkgVer -or $pkgVer -ne $latest.version) { throw "The package version does not match the release ($($latest.tag))." }
-    foreach ($must in 'Start-DashLauncher.ps1', 'Start-DashLauncher.bat', 'ui/rail.html', 'core/Launcher.Manifest.psm1') {
-        if (-not (Test-Path (Join-Path $stageDir $must))) { throw "The update package is missing $must." }
-    }
-    foreach ($f in Get-ChildItem $stageDir -Recurse -File -Include *.ps1, *.psm1) {
-        $errs = $null; $tokens = $null
-        [void][Management.Automation.Language.Parser]::ParseFile($f.FullName, [ref]$tokens, [ref]$errs)
-        if ($errs -and $errs.Count) { throw "The update package has a damaged script ($($f.Name)). Nothing was installed." }
-    }
+    $pkgVer = Test-Stage $stageDir
+    if ($pkgVer -ne $latest.version) { throw "The package version does not match the release ($($latest.tag))." }
 
     $staged = @{ version = "$($latest.version)"; tag = $latest.tag; stageDir = $stageDir; stagedAt = (Get-Date).ToString('o'); from = "$cur" }
     [IO.File]::WriteAllText($stagedJson, ($staged | ConvertTo-Json), $utf8)
@@ -216,7 +269,8 @@ try {
     exit 0
 } catch {
     Remove-Item (Join-Path $WorkDir '*.part') -Force -ErrorAction SilentlyContinue
-    if ($Action -eq 'Stage') { Remove-Item (Join-Path $WorkDir 'stage') -Recurse -Force -ErrorAction SilentlyContinue; Remove-Item (Join-Path $WorkDir 'DashLauncher-v*.zip*') -Force -ErrorAction SilentlyContinue }
+    if ($Action -ne 'Check') { Remove-Item (Join-Path $WorkDir 'unpack'), (Join-Path $WorkDir 'dropped.zip') -Recurse -Force -ErrorAction SilentlyContinue }
+    if ($Action -ne 'Check') { Remove-Item (Join-Path $WorkDir 'stage') -Recurse -Force -ErrorAction SilentlyContinue; Remove-Item (Join-Path $WorkDir 'DashLauncher-v*.zip*') -Force -ErrorAction SilentlyContinue }
     Write-Result @{ status = 'error'; current = $CurrentVersion; error = (Get-ErrorText $_); checkedAt = (Get-Date).ToString('o') }
     exit 1
 }

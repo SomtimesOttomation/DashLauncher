@@ -7,6 +7,8 @@
     tricks and oversized archives) into a temporary folder inside modules, checks its dash.json passes the launcher's
     rules and has the expected id, then renames the folder into place. An existing folder is never replaced.
     Only https links on github.com for the given repo are accepted.
+    With -ZipPath it uses a zip the person dropped into the updates folder instead of downloading (no -Repo or links
+    needed). If <zip>.sha256 sits beside it, the zip must match it. The dropped file itself is never changed.
     With -UpdateFolder it updates an installed module instead: the same download and checks, then the package's files
     are copied over that folder after backing up what they replace. Its lib\ and update\ folders and anything else not in
     the package are kept (a dash keeps its settings and cache outside its folder). Leftover files the new version no
@@ -16,9 +18,10 @@
 #>
 param(
     [Parameter(Mandatory)][string]$Id,
-    [Parameter(Mandatory)][string]$Repo,
-    [Parameter(Mandatory)][string]$ZipUrl,
-    [Parameter(Mandatory)][string]$ShaUrl,
+    [string]$Repo = '',
+    [string]$ZipUrl = '',
+    [string]$ShaUrl = '',
+    [string]$ZipPath = '',                 # a zip dropped into the updates folder instead of a GitHub download
     [Parameter(Mandatory)][string]$ModulesDir,
     [Parameter(Mandatory)][string]$ResultFile,
     [string]$FolderName = '',
@@ -34,6 +37,7 @@ try { [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::S
 Add-Type -AssemblyName System.IO.Compression, System.IO.Compression.FileSystem
 Import-Module (Join-Path $PSScriptRoot 'core\Launcher.Manifest.psm1') -Force
 $utf8 = New-Object System.Text.UTF8Encoding($false)
+$DroppedZip = $ZipPath          # (PowerShell names ignore case: $zipPath below is the working copy)
 $staging = $null
 $zipPath = $null
 $skipTop = 'lib', 'update', '.git'      # a module's own top-level folders that an update never backs up, overwrites or deletes
@@ -147,8 +151,17 @@ function Expand-Safe {
 
 try {
     if ($Id -cnotmatch '^[a-z][a-z0-9]{1,19}$') { throw 'Bad module id.' }
-    if ($Repo -notmatch '^[A-Za-z0-9-]+/[A-Za-z0-9._-]+$') { throw 'Bad repo name.' }
-    if (-not (Test-AllowedUrl $ZipUrl) -or -not (Test-AllowedUrl $ShaUrl)) { throw "Refusing a download link that is not this module's GitHub release." }
+    if ($DroppedZip) {
+        if (-not (Test-Path -LiteralPath $DroppedZip -PathType Leaf)) { throw 'The dropped package is no longer there.' }
+        if ((Get-Item -LiteralPath $DroppedZip).Length -gt $MaxZipBytes) { throw 'The dropped package is larger than expected.' }
+        if (-not $FolderName -and -not $UpdateFolder) {
+            # NBADash-v0.15.0.zip -> NBADash
+            $FolderName = [IO.Path]::GetFileNameWithoutExtension($DroppedZip) -replace '[-_ ]?v?\d+\.\d+\.\d+.*$', ''
+        }
+    } else {
+        if ($Repo -notmatch '^[A-Za-z0-9-]+/[A-Za-z0-9._-]+$') { throw 'Bad repo name.' }
+        if (-not (Test-AllowedUrl $ZipUrl) -or -not (Test-AllowedUrl $ShaUrl)) { throw "Refusing a download link that is not this module's GitHub release." }
+    }
     $fromVersion = ''
     if ($UpdateFolder) {
         $target = [IO.Path]::GetFullPath($UpdateFolder).TrimEnd('\', '/')
@@ -160,6 +173,11 @@ try {
         if ($FolderName -notmatch '^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$') { throw 'Bad folder name.' }
         if (-not (Test-Path -LiteralPath $ModulesDir -PathType Container)) { New-Item -ItemType Directory -Path $ModulesDir -Force | Out-Null }
         $target = Join-Path $ModulesDir $FolderName
+        # never a second copy of a module that is already installed under another folder name
+        foreach ($dir in @(Get-ChildItem -LiteralPath $ModulesDir -Directory -ErrorAction SilentlyContinue | Where-Object { -not $_.Name.StartsWith('.') })) {
+            $other = Read-DashManifest -Folder $dir.FullName
+            if ($other.Ok -and $other.Id -ceq $Id) { throw "$Id is already installed in $($dir.Name), so nothing was installed. Update it instead." }
+        }
         if (Test-Path -LiteralPath $target) {
             if (@(Get-ChildItem -LiteralPath $target -Force -ErrorAction SilentlyContinue).Count) { throw "There is already a folder named $FolderName in the modules folder, so nothing was installed. Remove or rename it, then try again." }
             Remove-Item -LiteralPath $target -Force
@@ -173,16 +191,27 @@ try {
     New-Item -ItemType Directory -Path $staging -Force | Out-Null
     $zipPath = Join-Path $staging 'package.zip'
 
-    Set-Progress 3 'Downloading the checksum...'
-    Save-Url $ShaUrl "$zipPath.sha256" 4096 3 5 'Checksum'
-    $line = ([IO.File]::ReadAllText("$zipPath.sha256")).Trim()
-    if ($line -notmatch '^([0-9a-fA-F]{64})\b') { throw 'The published checksum file is not in the expected format.' }
-    $expected = $Matches[1].ToLowerInvariant()
+    if ($DroppedZip) {
+        Set-Progress 20 'Copying the package...'
+        Copy-Item -LiteralPath $DroppedZip -Destination $zipPath -Force
+        if (Test-Path -LiteralPath "$DroppedZip.sha256") {
+            Set-Progress 60 'Checking it against its checksum...'
+            $line = ([IO.File]::ReadAllText("$DroppedZip.sha256")).Trim()
+            if ($line -notmatch '^([0-9a-fA-F]{64})\b') { throw 'The .sha256 file beside the package is not in the expected format.' }
+            if ((Get-FileHash -Path $zipPath -Algorithm SHA256).Hash.ToLowerInvariant() -ne $Matches[1].ToLowerInvariant()) { throw 'The package does not match the .sha256 file beside it. Nothing was installed.' }
+        }
+    } else {
+        Set-Progress 3 'Downloading the checksum...'
+        Save-Url $ShaUrl "$zipPath.sha256" 4096 3 5 'Checksum'
+        $line = ([IO.File]::ReadAllText("$zipPath.sha256")).Trim()
+        if ($line -notmatch '^([0-9a-fA-F]{64})\b') { throw 'The published checksum file is not in the expected format.' }
+        $expected = $Matches[1].ToLowerInvariant()
 
-    Save-Url $ZipUrl $zipPath $MaxZipBytes 5 80 'Downloading'
-    Set-Progress 82 'Checking the download...'
-    $actual = (Get-FileHash -Path $zipPath -Algorithm SHA256).Hash.ToLowerInvariant()
-    if ($actual -ne $expected) { throw 'The download did not match its published checksum and was discarded. Nothing was installed.' }
+        Save-Url $ZipUrl $zipPath $MaxZipBytes 5 80 'Downloading'
+        Set-Progress 82 'Checking the download...'
+        $actual = (Get-FileHash -Path $zipPath -Algorithm SHA256).Hash.ToLowerInvariant()
+        if ($actual -ne $expected) { throw 'The download did not match its published checksum and was discarded. Nothing was installed.' }
+    }
 
     Set-Progress 86 'Unpacking...'
     $unpack = Join-Path $staging 'files'
