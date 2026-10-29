@@ -107,7 +107,8 @@ function Get-ApprovalKey { param($Info) return ('{0}|{1}' -f $Info.Id, $Info.Fol
 
 # ---------------------------------------------------------------- catalog: known modules and their GitHub releases
 # GitHub is asked at start (at most once an hour) and when "Scan for modules" is pressed (at most every 10 minutes),
-# only while some catalog module is not installed. The answers are cached, so an offline start still shows them.
+# only while some catalog module is not installed. A module not yet seen published is asked about every time (at most
+# once a minute), so a newly published one shows up straight away. The answers are cached, so an offline start still shows them.
 $script:Catalog = @(Read-Catalog -Path (Join-Path $Root 'catalog.json'))
 $script:CatalogIds = @($script:Catalog | ForEach-Object { $_.Id })
 $script:CatalogCachePath = Join-Path $script:DataDir 'catalog-cache.json'
@@ -135,7 +136,12 @@ function Start-CatalogCheck {
     if (-not $repos.Count) { return }
     $last = [datetime]::MinValue
     if ($script:CatalogCache.checkedAt) { try { $last = [datetime]::Parse($script:CatalogCache.checkedAt, [Globalization.CultureInfo]::InvariantCulture) } catch { } }
-    if ($script:CatalogCache.ok -and ((Get-Date) - $last).TotalMinutes -lt $MinMinutes) { return }
+    # A module not yet seen published (new in the catalog, or its repo was private or had no release last time) is asked
+    # about at every start and Scan, at most once a minute, so it appears as soon as its release is out. Modules already
+    # seen published keep the longer wait.
+    $unseen = @($repos | Where-Object { $r = $script:CatalogCache.results[$_]; -not $r -or [string]$r.Status -ne 'published' })
+    $wait = $(if ($unseen.Count) { [Math]::Min($MinMinutes, 1) } else { $MinMinutes })
+    if ($script:CatalogCache.ok -and ((Get-Date) - $last).TotalMinutes -lt $wait) { return }
     $ps = [powershell]::Create()
     [void]$ps.AddScript("Import-Module '$((Join-Path $Root 'core\Launcher.Catalog.psm1') -replace "'", "''")' -Force; Get-ReleaseInfo -Repos `$args").AddArgument($repos)
     $script:CatalogJob = @{ Ps = $ps; Handle = $ps.BeginInvoke() }

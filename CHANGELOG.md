@@ -4,6 +4,9 @@ Changes are grouped by label: Feature, Bug/Fix, Redesign, Housekeeping. Every me
 
 ## Unreleased
 
+**Bug/Fix**
+- A module that had no published release at the last check (for example while its repo was private) is checked again at every start and Scan for modules, so its greyed tab appears as soon as its release is out instead of up to an hour later.
+
 ## Released
 
 ### v0.8.0
