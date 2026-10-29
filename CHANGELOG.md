@@ -4,10 +4,12 @@ Changes are grouped by label: Feature, Bug/Fix, Redesign, Housekeeping. Every me
 
 ## Unreleased
 
+## Released
+
+### v0.7.0
+
 **Feature**
 - Sample dash: the shared navigation bar with the live-status pause switch, plus a changelog and release-zip steps in its README, so a new dash starts with NBADash's look and the current release flow.
-
-## Released
 
 ### v0.6.0
 
