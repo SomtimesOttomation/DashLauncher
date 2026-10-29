@@ -4,6 +4,9 @@ Changes are grouped by label: Feature, Bug/Fix, Redesign, Housekeeping. Every me
 
 ## Unreleased
 
+**Feature**
+- NHLDash is in DashLauncher's list of modules: once its first release (v0.2.0 or later) is published on GitHub it shows as a greyed NHL tab with Install, and the update page can check it for updates.
+
 ## Released
 
 ### v0.7.0
