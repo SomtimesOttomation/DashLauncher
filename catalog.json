@@ -8,6 +8,14 @@
       "repo": "SomtimesOttomation/NBADash",
       "minVersion": "0.12.0",
       "icon": "ui/img/catalog/nbadash.svg"
+    },
+    {
+      "id": "nhldash",
+      "name": "NHL",
+      "title": "NHL 2026-27",
+      "repo": "SomtimesOttomation/NHLDash",
+      "minVersion": "0.2.0",
+      "icon": "ui/img/catalog/nhldash.svg"
     }
   ]
 }
