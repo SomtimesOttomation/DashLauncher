@@ -4,6 +4,9 @@ Changes are grouped by label: Feature, Bug/Fix, Redesign, Housekeeping. Every me
 
 ## Unreleased
 
+**Feature**
+- Drop-in updates: a DashLauncher or dashboard module zip dropped into the new `updates` folder is noticed within about 5 seconds, and a message asks whether to apply it. Apply runs the usual update and restart (or installs a new module); Not now asks again next start. A `.sha256` beside the zip is checked, and applied zips move to `updates\applied`.
+
 ## Released
 
 ### v0.5.0

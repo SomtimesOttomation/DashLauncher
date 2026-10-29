@@ -41,7 +41,7 @@ $backupDir = Join-Path $backupRoot ("v{0}" -f $OldVersion)
 $pendingFile = Join-Path $WorkDir 'update-pending.json'
 $okFile = Join-Path $WorkDir 'update-ok.json'
 $failFile = Join-Path $WorkDir 'update-failed.json'
-$skip = 'modules', 'lib', 'update', '.git'      # top-level folders that are never backed up, overwritten or deleted
+$skip = 'modules', 'updates', 'lib', 'update', '.git'      # top-level folders that are never backed up, overwritten or deleted
 
 function Write-Log {
     param([string]$Text)

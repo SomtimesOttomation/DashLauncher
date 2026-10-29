@@ -47,6 +47,11 @@ Updating downloads the release zip, checks it against its published checksum, th
 files and reopens it. If the new version does not start, the old one is restored. Updates never touch the `modules`
 folder, `lib\` or your settings; each dashboard module keeps its own updater.
 
+**Drop-in updates:** drop a DashLauncher or dashboard module zip (for example `NBADash-v0.15.0.zip`, straight from its
+GitHub release page) into DashLauncher's `updates` folder while it is open. Within about 5 seconds a message at the bottom
+right asks whether to apply it; **Apply** runs the usual update and restart, **Not now** leaves it for next time. A `.sha256`
+beside the zip is checked if there is one, and applied zips move to `updates\applied`. See `updates\README.md`.
+
 **Dashboard modules too (optional, off by default):** tick "Also check my dashboard modules for updates" on the update
 page. DashLauncher then also asks GitHub about every installed module in its list (when the page opens, at start with the
 daily check, or with Check again), shows each one's version, and puts an arrow on the tabs that have an update. Tick the
