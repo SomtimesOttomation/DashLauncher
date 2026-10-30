@@ -1,12 +1,16 @@
-// Bridge between the Sample dash page and whoever hosts it (Start-SampleDash.ps1 or DashLauncher).
+// Bridge between the page and the PowerShell host.
+//
+// Inside WebView2: request/response over window.chrome.webview messages.
 //   page -> host : { id, cmd, args }
 //   host -> page : { id, ok, data, error }  (response)   or   { event, data }  (push)
+// In a normal browser (preview/dev): a mock host is loaded from dev/mock.js.
 
 export const isHost = !!(window.chrome && window.chrome.webview);
 
 const pending = new Map();
 const handlers = new Map();
 let nextId = 1;
+let mock = null;
 
 export function on(evt, fn) {
   if (!handlers.has(evt)) handlers.set(evt, new Set());
@@ -35,16 +39,22 @@ if (isHost) {
   });
 }
 
+export async function ready() {
+  if (!isHost && !mock) {
+    mock = await import('../dev/mock.js');
+    mock.attach(emit);
+  }
+}
+
 export async function request(cmd, args = {}, timeoutMs = 30000) {
-  if (!isHost) throw new Error('Open the Sample dash with Start-SampleDash.bat or from DashLauncher.');
+  if (!isHost) {
+    await ready();
+    return mock.request(cmd, args);
+  }
   return new Promise((resolve, reject) => {
     const id = nextId++;
     const timer = setTimeout(() => { pending.delete(id); reject(new Error(`host timeout: ${cmd}`)); }, timeoutMs);
     pending.set(id, { resolve, reject, timer });
     window.chrome.webview.postMessage({ id, cmd, args });
   });
-}
-
-export function setTheme(theme) {
-  document.documentElement.dataset.theme = theme || 'system';
 }
