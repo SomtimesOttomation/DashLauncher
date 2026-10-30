@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-    Sample dash on its own: a WebView2 window around modules\Sample.Host.psm1.
+    Sample dash on its own: a WebView2 window around modules\SampleDash.Host.psm1.
 .DESCRIPTION
     Windows PowerShell 5.1. This is the whole "thin host" a dash needs to run standalone under DashLauncher's dash
     contract: make the window and WebView2, build the context, call the backend. DashLauncher does the same for its tab.
@@ -57,7 +57,7 @@ $context = [pscustomobject]@{
     LauncherVersion = ''
     Debug           = [bool]$Debug
 }
-Import-Module (Join-Path $Root 'modules\Sample.Host.psm1') -Force
+Import-Module (Join-Path $Root 'modules\SampleDash.Host.psm1') -Force
 $init = Initialize-Dash -Context $context
 if (-not $init.Ok) {
     $why = if ($init.Reason -eq 'locked') { 'The Sample dash is already open, in its own window or in DashLauncher.' } else { "The Sample dash could not start: $($init.Reason)" }

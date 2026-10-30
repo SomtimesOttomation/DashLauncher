@@ -30,6 +30,11 @@ Write-Host "Dash contract check: $folder"
 $info = Read-DashManifest -Folder $folder
 if (-not $info.Ok) { Fail "dash.json: $($info.Reason)"; exit 1 }
 Pass ("dash.json: {0} ({1}) v{2}, contract {3}" -f $info.Title, $info.Id, $info.Version, $info.Contract)
+if (Test-Path -LiteralPath (Join-Path $folder '.github/workflows/release.yml') -PathType Leaf) { Pass 'release workflow present (.github/workflows/release.yml)' }
+else { Note 'no .github/workflows/release.yml: releases will have no update package (see samples\SampleDash)' }
+$updScript = @(Get-ChildItem -LiteralPath $folder -File -ErrorAction SilentlyContinue | Where-Object { $_.Name -like 'Update-*.ps1' })
+if ($updScript.Count -and (Test-Path -LiteralPath (Join-Path $folder 'Apply-Update.ps1') -PathType Leaf)) { Pass ("updater present ({0}, Apply-Update.ps1)" -f $updScript[0].Name) }
+else { Note 'no updater (Update-<Name>.ps1 and Apply-Update.ps1): see samples\SampleDash' }
 if (-not @($info.DataSources).Count) { Note 'dash.json lists no dataSources. Fine for a dash that contacts nothing; otherwise list every third-party source and its terms.' }
 
 # 2. backend exports
