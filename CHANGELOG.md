@@ -4,13 +4,15 @@ Changes are grouped by label: Feature, Bug/Fix, Redesign, Housekeeping. Every me
 
 ## Unreleased
 
+## Released
+
+### v0.9.1
+
 **Redesign**
 - Sample dash page rebuilt from NBADash's own code instead of NHLDash's: NBADash's file layout (`ui/js`, views), CSS, banner, week bar, game cards, sync strip, hover cards (`calc`), settings tabs, update window and traffic panel (opened by clicking the brand five times). Adds a browser preview (`ui/dev/mock.js`) and a note on wide logos. The release workflow is now NBADash's file word for word, with `SampleDash` to rename.
 
 **Bug/Fix**
 - Sample dash: the traffic panel no longer opens empty (the same bug is in NBADash: its first draw ran before the panel was shown, which stopped the timer).
-
-## Released
 
 ### v0.9.0
 
