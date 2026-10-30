@@ -4,6 +4,9 @@ Changes are grouped by label: Feature, Bug/Fix, Redesign, Housekeeping. Every me
 
 ## Unreleased
 
+**Bug/Fix**
+- Module update check (and the catalog check) found nothing when two or more modules were listed: the repo names were sent to GitHub joined together. Check again now shows each module's latest version.
+
 ## Released
 
 ### v0.9.1

@@ -143,7 +143,7 @@ function Start-CatalogCheck {
     $wait = $(if ($unseen.Count) { [Math]::Min($MinMinutes, 1) } else { $MinMinutes })
     if ($script:CatalogCache.ok -and ((Get-Date) - $last).TotalMinutes -lt $wait) { return }
     $ps = [powershell]::Create()
-    [void]$ps.AddScript("Import-Module '$((Join-Path $Root 'core\Launcher.Catalog.psm1') -replace "'", "''")' -Force; Get-ReleaseInfo -Repos `$args").AddArgument($repos)
+    [void]$ps.AddScript("param([string[]]`$Repos) Import-Module '$((Join-Path $Root 'core\Launcher.Catalog.psm1') -replace "'", "''")' -Force; Get-ReleaseInfo -Repos `$Repos").AddParameter('Repos', [string[]]$repos)
     $script:CatalogJob = @{ Ps = $ps; Handle = $ps.BeginInvoke() }
 }
 function Complete-CatalogCheck {
@@ -477,7 +477,7 @@ function Start-ModuleCheck {
                ForEach-Object { Get-CatalogEntry $_.Id } | Where-Object { $_ } | ForEach-Object { $_.Repo } | Select-Object -Unique)
     if (-not $repos.Count) { $script:ModCheckedAt = (Get-Date).ToString('o'); Send-ModuleUpdateState; return }
     $ps = [powershell]::Create()
-    [void]$ps.AddScript("Import-Module '$((Join-Path $Root 'core\Launcher.Catalog.psm1') -replace "'", "''")' -Force; Get-ReleaseInfo -Repos `$args").AddArgument($repos)
+    [void]$ps.AddScript("param([string[]]`$Repos) Import-Module '$((Join-Path $Root 'core\Launcher.Catalog.psm1') -replace "'", "''")' -Force; Get-ReleaseInfo -Repos `$Repos").AddParameter('Repos', [string[]]$repos)
     $script:ModJob = @{ Ps = $ps; Handle = $ps.BeginInvoke() }
     $script:ModJobToast = [bool]$Toast
     Send-ModuleUpdateState
