@@ -38,7 +38,7 @@ const notices = {
   empty: { kind: 'empty', modulesDir: 'C:\\Tools\\DashLauncher\\modules', scanFolders: ['C:\\Tools\\DashLauncher\\modules'] },
 };
 
-export function attach(fn) { emit = fn; }
+export function attach(fn) { emit = fn; window.__pushTabs = () => emit('tabs', { tabs, active, theme }); }
 
 export async function request(cmd, args) {
   await new Promise((r) => setTimeout(r, 30));
@@ -46,6 +46,13 @@ export async function request(cmd, args) {
     case 'rail.init':
       setTimeout(() => emit('tabs', { tabs, active, theme, launcherUpdate: '0.3.0', overlay: location.hash === '#update' ? 'update' : '' }), 10);
       return { version: '0.2.0', theme, debug: true };
+    case 'tabs.reorder': {
+      const by = new Map(tabs.map((t) => [t.id, t]));
+      const next = args.ids.map((id) => by.get(id)).filter(Boolean);
+      tabs.splice(0, tabs.length, ...next, ...tabs.filter((t) => !args.ids.includes(t.id)));
+      window.__lastOrder = args.ids;
+      return true;
+    }
     case 'tab.select': active = args.id; setTimeout(() => emit('tabs', { tabs, active, theme }), 10); return true;
     case 'theme.set': theme = args.theme; return true;
     case 'app.restart': return window.confirm('Mock: restart DashLauncher?') ? true : false;

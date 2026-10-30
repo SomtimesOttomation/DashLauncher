@@ -38,6 +38,7 @@ function tooltip(t) {
   if (t.syncing) parts.push(t.syncPct != null ? `Syncing ${t.syncPct}%` : 'Syncing');
   if (t.update) parts.push(`Update available: v${t.update}`);
   if (t.statusError) parts.push(t.statusError);
+  parts.push('Drag to reorder');
   return parts.join('\n');
 }
 
@@ -53,7 +54,7 @@ function badges(t) {
 
 function render() {
   tabsEl.innerHTML = state.tabs.map((t) => {
-    const icon = t.icon ? `<img src="${esc(t.icon)}" alt="">` : `<span class="tab-fallback">${esc((t.name || '?').slice(0, 2).toUpperCase())}</span>`;
+    const icon = t.icon ? `<img src="${esc(t.icon)}" alt="" draggable="false">` : `<span class="tab-fallback">${esc((t.name || '?').slice(0, 2).toUpperCase())}</span>`;
     const cls = ['tab', t.id === state.active ? 'active' : '', (t.state === 'declined' || t.state === 'broken' || t.state === 'available') ? 'dim' : ''].join(' ').trim();
     return `<button class="${cls}" type="button" data-id="${esc(t.id)}" title="${esc(tooltip(t))}" aria-label="${esc(t.name)}" ${t.id === state.active ? 'aria-current="page"' : ''}>
       <span class="tab-icon">${icon}${badges(t)}</span><span class="tab-name">${esc(t.name)}</span></button>`;
@@ -67,7 +68,79 @@ function render() {
   bridge.setTheme(state.theme);
 }
 
+// ---- drag to reorder: press on a tab and move it up or down; the order is saved by the launcher.
+// Alt+Up / Alt+Down move the focused tab too. While dragging, the launcher's 2-second rail updates wait.
+let drag = null;            // { el, id, startY, moved }
+let held = null;            // a 'tabs' update that arrived during a drag
+let swallowClick = false;
+
+function orderFromDom() { return [...tabsEl.querySelectorAll('.tab')].map((b) => b.dataset.id); }
+function saveOrder(ids) {
+  const byId = new Map(state.tabs.map((t) => [t.id, t]));
+  state.tabs = ids.map((id) => byId.get(id)).filter(Boolean);
+  bridge.request('tabs.reorder', { ids }).catch((err) => console.warn(err.message));
+}
+
+tabsEl.addEventListener('pointerdown', (e) => {
+  const b = e.target.closest('.tab');
+  if (!b || e.button !== 0) return;
+  drag = { el: b, id: b.dataset.id, startY: e.clientY, moved: false, before: orderFromDom().join(',') };
+});
+window.addEventListener('pointermove', (e) => {
+  if (!drag) return;
+  if (!drag.moved) {
+    if (Math.abs(e.clientY - drag.startY) < 6) return;
+    drag.moved = true;
+    drag.el.classList.add('dragging');
+    document.body.classList.add('reordering');
+    try { drag.el.setPointerCapture(e.pointerId); } catch { /* ignore */ }
+  }
+  // move the dragged tab past any neighbour whose middle the pointer has crossed
+  const prev = drag.el.previousElementSibling;
+  const next = drag.el.nextElementSibling;
+  if (prev && e.clientY < prev.getBoundingClientRect().top + prev.offsetHeight / 2) tabsEl.insertBefore(drag.el, prev);
+  else if (next && e.clientY > next.getBoundingClientRect().top + next.offsetHeight / 2) tabsEl.insertBefore(next, drag.el);
+  // scroll the rail when dragging near its ends
+  const r = tabsEl.getBoundingClientRect();
+  if (e.clientY < r.top + 24) tabsEl.scrollTop -= 8; else if (e.clientY > r.bottom - 24) tabsEl.scrollTop += 8;
+});
+function endDrag() {
+  if (!drag) return;
+  const d = drag;
+  drag = null;
+  if (d.moved) {
+    d.el.classList.remove('dragging');
+    document.body.classList.remove('reordering');
+    swallowClick = true;                  // the click that ends a drag does not select the tab
+    setTimeout(() => { swallowClick = false; }, 0);
+  }
+  if (held) { const h = held; held = null; state = { ...state, ...h }; }   // an update held during the drag
+  if (d.moved) {
+    const ids = orderFromDom();
+    if (ids.join(',') !== d.before) saveOrder(ids);                       // after it, so the new order wins
+  }
+  if (d.moved) render();                  // a plain click must keep its element, or the click never arrives
+}
+tabsEl.addEventListener('dragstart', (e) => e.preventDefault());   // no native image drag: it would cancel ours
+window.addEventListener('pointerup', endDrag);
+window.addEventListener('pointercancel', endDrag);
+
+tabsEl.addEventListener('keydown', (e) => {
+  if (!e.altKey || (e.key !== 'ArrowUp' && e.key !== 'ArrowDown')) return;
+  const b = e.target.closest('.tab');
+  if (!b) return;
+  e.preventDefault();
+  const sib = e.key === 'ArrowUp' ? b.previousElementSibling : b.nextElementSibling;
+  if (!sib) return;
+  if (e.key === 'ArrowUp') tabsEl.insertBefore(b, sib); else tabsEl.insertBefore(sib, b);
+  saveOrder(orderFromDom());
+  render();
+  const again = tabsEl.querySelector(`.tab[data-id="${CSS.escape(b.dataset.id)}"]`);
+  if (again) again.focus();
+});
+
 tabsEl.addEventListener('click', (e) => {
+  if (swallowClick) { swallowClick = false; return; }
   const b = e.target.closest('.tab');
   if (!b || b.dataset.id === state.active) return;
   state.active = b.dataset.id;            // show it straight away; the host confirms with a 'tabs' push
@@ -107,7 +180,11 @@ killBtn.addEventListener('click', async () => {
   } catch (err) { console.warn(err.message); }
 });
 
-bridge.on('tabs', (d) => { state = { ...state, ...d }; render(); });
+bridge.on('tabs', (d) => {
+  if (drag && drag.moved) { held = { ...(held || {}), ...d }; return; }    // applied when the drag ends
+  state = { ...state, ...d };
+  render();
+});
 verEl.addEventListener('click', () => bridge.request('update.open').catch((err) => console.warn(err.message)));
 
 (async () => {

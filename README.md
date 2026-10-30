@@ -20,7 +20,7 @@ Windows PowerShell 5.1 + WebView2. No installer, no admin rights, no build step.
        NBADash\
    ```
 4. A module you copy in yourself that is not in the launcher's list is added after you say yes.
-5. Click a tab on the left to switch sports. The bottom of the rail has:
+5. Click a tab on the left to switch sports. Drag a tab up or down to change the order (or Alt+Up / Alt+Down); DashLauncher remembers it. The bottom of the rail has:
    - **Scan for modules**: looks in the `modules` folder again (it also looks every time DashLauncher starts).
    - **Restart & Reload**: closes DashLauncher and opens it again on the same tab, so an updated module you dropped into
      `modules` is read afresh. If a dashboard is syncing or a module is installing, it asks first.

@@ -4,6 +4,9 @@ Changes are grouped by label: Feature, Bug/Fix, Redesign, Housekeeping. Every me
 
 ## Unreleased
 
+**Feature**
+- Drag the sport tabs on the rail to reorder them (or Alt+Up / Alt+Down on a focused tab). The order is remembered, applies to greyed tabs too, and Ctrl+1 to Ctrl+9 follow it.
+
 **Bug/Fix**
 - A module that had no published release at the last check (for example while its repo was private) is checked again at every start and Scan for modules, so its greyed tab appears as soon as its release is out instead of up to an hour later.
 
