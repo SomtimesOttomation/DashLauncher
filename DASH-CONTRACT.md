@@ -266,6 +266,11 @@ required one raises it, and the launcher keeps supporting the previous number fo
 - [ ] After the kill switch, no data source is contacted until the person resumes inside the dash (update checks may still run).
 - [ ] Settings, cache and other data live outside the dash's folder, so an update from the launcher keeps them.
 - [ ] The page commands `traffic.stop` and `traffic.resume` both work and reply `ok`, and each sends the `traffic` event to the page.
+- [ ] Release workflow present: `.github/workflows/release.yml` (as in `samples\SampleDash`) builds and attaches
+      `<Name>-vX.Y.Z.zip` and `.sha256` when a GitHub release is published, so the dash's updater, the launcher's
+      Install button and its module updates find a package.
+- [ ] Updater present: `Update-<Name>.ps1` and `Apply-Update.ps1`, the `update.*` page commands and the version button
+      with its update window (check, download, verify, swap, relaunch, roll back), as in `samples\SampleDash`.
 - [ ] Its release zip has `dash.json` at the root; extracted into DashLauncher's `modules` folder, it appears as a tab after Scan for modules.
 - [ ] Every data source is listed in `dataSources`, and its terms have been read.
 - [ ] Helper module names are unique to the dash (for example `Nba.Data`, not `Data`).

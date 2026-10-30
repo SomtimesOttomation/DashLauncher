@@ -4,6 +4,12 @@ Changes are grouped by label: Feature, Bug/Fix, Redesign, Housekeeping. Every me
 
 ## Unreleased
 
+**Feature**
+- Sample dash: everything a new dash needs from day one, copied from NHLDash and kept offline with a made-up league: release workflow, updater (version button, update window, check, download, verify, swap, roll back), team banner with several favourites, week bar, NBADash's sizes and game cards, a season sync with real progress, a traffic page per server, hover cards for stat terms, and the rule that a failed download waits for Refresh. Its backend is now `SampleDash.Host.psm1`, so a new dash renames one word.
+
+**Housekeeping**
+- Contract checklist: "release workflow present" and "updater present"; `tools\Test-DashContract.ps1` reports both.
+
 ## Released
 
 ### v0.8.0

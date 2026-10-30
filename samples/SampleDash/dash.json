@@ -5,9 +5,14 @@
   "title": "Sample Dash",
   "versionFile": "VERSION",
   "icon": "ui/img/tab-icon.svg",
-  "backend": "modules/Sample.Host.psm1",
+  "backend": "modules/SampleDash.Host.psm1",
   "ui": "ui",
   "entry": "index.html",
   "standalone": "Start-SampleDash.bat",
-  "dataSources": []
+  "dataSources": [
+    {
+      "name": "GitHub releases (update check, only when you ask)",
+      "terms": "https://docs.github.com/en/site-policy/github-terms/github-terms-of-service"
+    }
+  ]
 }
