@@ -792,9 +792,18 @@ function Update-Tabs {
     }
     foreach ($t in $newTabs) { if (($t.Module -or $t.Init) -and $t.Info) { $seen[(Get-ApprovalKey $t.Info)] = $true } }
     $removed = @($before.Keys | Where-Object { -not $seen.ContainsKey($_) }).Count
+    # the person's tab order (dragged on the rail) applies to every tab, installed or greyed; tabs not in it keep their
+    # place after the ordered ones, and modules with a dash.json problem stay at the end
+    $pos = 0
+    $sorted = @($newTabs | ForEach-Object {
+        $i = [array]::IndexOf($order, $_.Id)
+        $key = $(if ($_.State -eq 'broken') { 20000 + $pos } elseif ($i -ge 0) { $i } else { 10000 + $pos })
+        $pos++
+        [pscustomobject]@{ Key = $key; Tab = $_ }
+    } | Sort-Object Key | ForEach-Object { $_.Tab })
     $script:Tabs.Clear()
     $script:ById.Clear()
-    foreach ($t in $newTabs) { [void]$script:Tabs.Add($t); $script:ById[$t.Id] = $t }
+    foreach ($t in $sorted) { [void]$script:Tabs.Add($t); $script:ById[$t.Id] = $t }
     return @{ added = $added; removed = $removed; broken = $n; total = @($newTabs | Where-Object { @('broken', 'available') -notcontains $_.State }).Count }
 }
 
@@ -1484,6 +1493,19 @@ function Invoke-LauncherCommand {
             $t = & $tabArg
             if (-not $t -or $t.State -ne 'locked') { & $fail 'not locked'; return }
             & $reply ((Show-StandaloneWindow $t).ToString().ToLower())
+        }
+        'tabs.reorder' {
+            # the rail's new order after a drag; tabs it does not name keep their place after the named ones
+            $ids = @(@($a.ids) | Where-Object { $_ -is [string] -and $script:ById.ContainsKey($_) } | Select-Object -Unique)
+            if (-not $ids.Count) { & $fail 'no tabs'; return }
+            $rest = @($script:Tabs | Where-Object { $ids -notcontains $_.Id })
+            $new = @($ids | ForEach-Object { $script:ById[$_] }) + $rest
+            $script:Tabs.Clear()
+            foreach ($t in $new) { [void]$script:Tabs.Add($t) }
+            $script:Settings.order = @($script:Tabs | Where-Object { $_.State -ne 'broken' } | ForEach-Object { $_.Id })
+            Save-Settings
+            & $reply 'true'
+            Push-RailState
         }
         'theme.set' {
             $th = [string]$a.theme

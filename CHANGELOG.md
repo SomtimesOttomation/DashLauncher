@@ -4,6 +4,9 @@ Changes are grouped by label: Feature, Bug/Fix, Redesign, Housekeeping. Every me
 
 ## Unreleased
 
+**Feature**
+- Drag the sport tabs on the rail to reorder them (or Alt+Up / Alt+Down on a focused tab). The order is remembered, applies to greyed tabs too, and Ctrl+1 to Ctrl+9 follow it.
+
 ## Released
 
 ### v0.8.0
