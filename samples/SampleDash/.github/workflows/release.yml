@@ -1,8 +1,7 @@
 name: Release assets
 
-# You publish the release on GitHub (tag vX.Y.Z). This builds the update package and attaches it:
-# <RepoName>-vX.Y.Z.zip and <RepoName>-vX.Y.Z.zip.sha256, the files the dash's updater, DashLauncher's Install button
-# and drop-in updates look for. Name the repo after the dash folder (F1Dash, FADash) and nothing here needs changing.
+# You publish the release on GitHub (tag vX.Y.Z). This builds the update package and attaches it.
+# Copied from NBADash. When you copy the Sample, replace every "SampleDash" in this file with your dash name.
 on:
   release:
     types: [published]
@@ -16,7 +15,6 @@ jobs:
     env:
       TAG: ${{ github.event.release.tag_name }}
       GH_TOKEN: ${{ github.token }}
-      NAME: ${{ github.event.repository.name }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -40,10 +38,10 @@ jobs:
       - name: Build the zip and checksum
         run: |
           mkdir dist
-          git archive --format=zip -o "dist/$NAME-$TAG.zip" "$TAG"
-          (cd dist && sha256sum "$NAME-$TAG.zip" > "$NAME-$TAG.zip.sha256")
-          cat "dist/$NAME-$TAG.zip.sha256"
-          unzip -l "dist/$NAME-$TAG.zip" | tail -n 3
+          git archive --format=zip -o "dist/SampleDash-$TAG.zip" "$TAG"
+          (cd dist && sha256sum "SampleDash-$TAG.zip" > "SampleDash-$TAG.zip.sha256")
+          cat "dist/SampleDash-$TAG.zip.sha256"
+          unzip -l "dist/SampleDash-$TAG.zip" | tail -n 3
 
       - name: Attach to the release
         run: gh release upload "$TAG" dist/* --clobber

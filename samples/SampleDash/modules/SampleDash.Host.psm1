@@ -49,7 +49,7 @@ $script:Pretend = @{ Live = 0; Update = $false; Problem = $false }
 $script:TeamCodes = @('AUR', 'BAY', 'CED', 'DUN', 'EMB', 'FOX', 'GLA', 'HAR', 'IRO', 'JUN', 'KES', 'LAN')
 
 function New-DefaultSettings {
-    return [ordered]@{ autoRefresh = $false; autoAck = $false; refreshSeconds = 60; favorites = @(); updateCheck = $false }
+    return [ordered]@{ theme = 'system'; autoRefresh = $false; autoAck = $false; refreshSeconds = 60; favorites = @(); updateCheck = $false }
 }
 
 # ---------------------------------------------------------------- page messages
@@ -72,6 +72,7 @@ function Read-Settings {
     } catch { }
     $s.autoRefresh = [bool]$s.autoRefresh; $s.autoAck = [bool]$s.autoAck; $s.updateCheck = [bool]$s.updateCheck
     $s.refreshSeconds = Limit-Seconds $s.refreshSeconds
+    if (@('system', 'light', 'dark') -notcontains [string]$s.theme) { $s.theme = 'system' }
     $s.favorites = Limit-Teams $s.favorites
     return $s
 }
@@ -185,6 +186,19 @@ $script:WorkerScript = {
         }
         return , $games
     }
+    function ConvertTo-Events($Games) {
+        # NBADash's event shape, so the page code is NBADash's: state pre/in/post, sides with side, abbr and score.
+        $out = foreach ($g in $Games) {
+            $st = switch ($g.state) { 'LIVE' { 'in' } 'FINAL' { 'post' } default { 'pre' } }
+            $period = 0; $clock = ''
+            if ($g.state -eq 'LIVE' -and $g.clock -match '^P(\d) (.+)$') { $period = [int]$Matches[1]; $clock = $Matches[2] }
+            if ($g.state -eq 'FINAL') { $period = $(if ($g.ot) { 4 } else { 3 }) }
+            [ordered]@{ id = $g.id; state = $st; date = $g.start; period = $period; clock = $clock; detail = ''; venue = $g.venue
+                        sides = @(@{ side = 'away'; abbr = $g.away.code; score = $(if ($null -ne $g.away.score) { [string]$g.away.score } else { $null }); leaders = @() },
+                                  @{ side = 'home'; abbr = $g.home.code; score = $(if ($null -ne $g.home.score) { [string]$g.home.score } else { $null }); leaders = @() }) }
+        }
+        return , @($out)
+    }
     function Get-Standings {
         $rec = @{}
         foreach ($c in $TeamCodes) { $rec[$c] = [ordered]@{ code = $c; gp = 0; w = 0; l = 0; otl = 0; pts = 0; gf = 0; ga = 0; last10 = @() } }
@@ -222,8 +236,8 @@ $script:WorkerScript = {
         Start-Sleep -Milliseconds (120 + (Get-Random -Maximum 260))        # like a real request
         if ($Shared.FailDownloads) { throw 'Pretend download failure (Sample tools on the Settings page).' }
         $k = $Item.Key
-        $body = if ($k -match '^score:(.+)$') { @{ date = $Matches[1]; games = (Get-DayGames ([datetime]$Matches[1])) } }
-                elseif ($k -match '^week:(.+)$') { $m = [datetime]$Matches[1]; @{ monday = $Matches[1]; days = @(0..6 | ForEach-Object { $d = $m.AddDays($_); @{ date = $d.ToString('yyyy-MM-dd'); games = (Get-DayGames $d) } }) } }
+        $body = if ($k -match '^score:(.+)$') { $d = [datetime]$Matches[1]; @{ date = $d.ToString('yyyyMMdd'); events = (ConvertTo-Events (Get-DayGames $d)) } }
+                elseif ($k -match '^week:(.+)$') { $m = [datetime]$Matches[1]; @{ monday = $Matches[1]; days = @(0..6 | ForEach-Object { $d = $m.AddDays($_); @{ date = $d.ToString('yyyyMMdd'); events = (ConvertTo-Events (Get-DayGames $d)) } }) } }
                 elseif ($k -match '^team:(.+)$') { Get-Team $Matches[1] }
                 else { Get-Standings }
         return (ConvertTo-Json -InputObject $body -Depth 8 -Compress)
@@ -236,17 +250,19 @@ $script:WorkerScript = {
             if ($Shared.Halted -or $item.Gen -ne $Shared.Gen -or $Shared.Skip.ContainsKey($item.Key)) { continue }
             $Shared.Requests++
             $hostName = ([uri]$item.Url).Host
+            $kind = ($item.Key -split ':')[0]
             if (-not $Shared.ByHost.ContainsKey($hostName)) { $Shared.ByHost[$hostName] = @{ requests = 0; bytes = [long]0; errors = 0 } }
-            $hs = $Shared.ByHost[$hostName]; $hs.requests++
+            if (-not $Shared.ByKind.ContainsKey($kind)) { $Shared.ByKind[$kind] = @{ requests = 0; bytes = [long]0 } }
+            $hs = $Shared.ByHost[$hostName]; $hs.requests++; $Shared.ByKind[$kind].requests++
             $t0 = Get-Date
             $text = Invoke-FakeServer $item
             $len = $utf8.GetByteCount($text)
-            $Shared.Bytes += $len; $hs.bytes += $len
+            $Shared.Bytes += $len; $hs.bytes += $len; $Shared.ByKind[$kind].bytes += $len
             [void]$Shared.Last.Insert(0, @{ at = $t0.ToString('o'); key = $item.Key; host = $hostName; bytes = $len; ms = [int]((Get-Date) - $t0).TotalMilliseconds; ok = $true })
             while ($Shared.Last.Count -gt 40) { $Shared.Last.RemoveAt(40) }
             if ($Shared.Halted -or $item.Gen -ne $Shared.Gen) { continue }
             [IO.File]::WriteAllText((Join-Path $CacheDir $item.File), $text, $utf8)
-            if ($item.Key -eq $Shared.TodayKey) { $Shared.Live = ([regex]::Matches($text, '"state":"LIVE"')).Count }
+            if ($item.Key -eq $Shared.TodayKey) { $Shared.Live = ([regex]::Matches($text, '"state":"in"')).Count }
             $head = '{{"event":"data","data":{{"key":"{0}","ok":true,"cached":false,"at":"{1}","body":' -f $item.Key, [datetime]::UtcNow.ToString('o')
             $Out.Enqueue($head + $text + '}}')
             $Shared.LastError = $null
@@ -404,7 +420,7 @@ function Initialize-Dash {
     $script:Pretend = @{ Live = 0; Update = $false; Problem = $false }
     $script:Shared = [hashtable]::Synchronized(@{
         Quit = $false; Halted = $false; Gen = 0; Live = 0; Requests = 0; Bytes = [long]0; Errors = 0; LastError = $null; FailDownloads = $false
-        Pending = [hashtable]::Synchronized(@{}); Skip = [hashtable]::Synchronized(@{}); ByHost = [hashtable]::Synchronized(@{})
+        Pending = [hashtable]::Synchronized(@{}); Skip = [hashtable]::Synchronized(@{}); ByHost = [hashtable]::Synchronized(@{}); ByKind = [hashtable]::Synchronized(@{})
         Last = [System.Collections.ArrayList]::Synchronized((New-Object System.Collections.ArrayList)); Started = Get-Date; TodayKey = 'score:' + (Get-Date).ToString('yyyy-MM-dd')
     })
     $script:Queue = New-Object 'System.Collections.Concurrent.BlockingCollection[object]'
@@ -509,6 +525,7 @@ function Invoke-DashCommand {
                     'refreshSeconds' { $s.refreshSeconds = Limit-Seconds $a.value }
                     'favorites' { $s.favorites = Limit-Teams $a.value }
                     'updateCheck' { $s.updateCheck = [bool]$a.value }
+                    'theme' { if (@('system', 'light', 'dark') -contains [string]$a.value) { $s.theme = [string]$a.value } }
                     default { ReplyError $id 'unknown setting'; return }
                 }
                 Save-Settings
@@ -556,7 +573,13 @@ function Invoke-DashCommand {
                 $s = $script:Shared
                 $hosts = @{}
                 foreach ($h in @($s.ByHost.Keys)) { $hosts[$h] = $s.ByHost[$h] }
-                $obj = @{ uptimeSec = [int]((Get-Date) - $s.Started).TotalSeconds; requests = [int]$s.Requests; bytes = [long]$s.Bytes; errors = [int]$s.Errors; byHost = $hosts; last = @($s.Last.ToArray()) }
+                $kinds = @{}
+                foreach ($k in @($s.ByKind.Keys)) { $kinds[$k] = $s.ByKind[$k] }
+                $list = @($s.Last.ToArray())
+                $lastText = $(if ($list.Count) { '{0} ({1})' -f $list[0].key, ([datetime]$list[0].at).ToString('T') } else { '' })
+                # NBADash's fields (bytes, byKind, last) plus per-server counts and the last 40 requests
+                $obj = @{ uptimeSec = [int]((Get-Date) - $s.Started).TotalSeconds; requests = [int]$s.Requests; bytes = [long]$s.Bytes; wireBytes = [long]$s.Bytes; errors = [int]$s.Errors
+                          byKind = $kinds; byHost = $hosts; last = $lastText; lastList = $list }
                 Reply $id (ConvertTo-Json -InputObject $obj -Depth 5 -Compress)
             }
             'cache.clear' {
@@ -596,8 +619,8 @@ function Receive-DashEvents {
     if ($script:SyncKeys) {
         $left = @($script:SyncKeys | Where-Object { $script:Shared.Pending.ContainsKey($_) }).Count
         $pct = [int](100 * ($script:SyncTotal - $left) / $script:SyncTotal)
-        if ($left -eq 0) { $script:SyncKeys = $null; $out.Add('{"event":"sync","data":{"running":false,"pct":100}}') }
-        elseif ($pct -ne $script:LastSyncPct) { $script:LastSyncPct = $pct; $out.Add(('{{"event":"sync","data":{{"running":true,"pct":{0}}}}}' -f $pct)) }
+        if ($left -eq 0) { $script:SyncKeys = $null; $out.Add(('{{"event":"sync","data":{{"running":false,"pct":100,"exitCode":0,"summary":"{0} requests","lastRun":"{1}"}}}}' -f $script:SyncTotal, (Get-Date).ToString('o'))) }
+        elseif ($pct -ne $script:LastSyncPct) { $script:LastSyncPct = $pct; $out.Add(('{{"event":"sync","data":{{"running":true,"pct":{0},"text":"Downloading {1} of {2}"}}}}' -f $pct, ($script:SyncTotal - $left), $script:SyncTotal)) }
     }
     $msg = $null
     while ($out.Count -lt 25 -and $script:Out.TryDequeue([ref]$msg)) { $out.Add($msg) }
