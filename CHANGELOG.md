@@ -4,6 +4,10 @@ Changes are grouped by label: Feature, Bug/Fix, Redesign, Housekeeping. Every me
 
 ## Unreleased
 
+## Released
+
+### v0.9.0
+
 **Feature**
 - Drag the sport tabs on the rail to reorder them (or Alt+Up / Alt+Down on a focused tab). The order is remembered, applies to greyed tabs too, and Ctrl+1 to Ctrl+9 follow it.
 - Sample dash: everything a new dash needs from day one, copied from NHLDash and kept offline with a made-up league: release workflow, updater (version button, update window, check, download, verify, swap, roll back), team banner with several favourites, week bar, NBADash's sizes and game cards, a season sync with real progress, a traffic page per server, hover cards for stat terms, and the rule that a failed download waits for Refresh. Its backend is now `SampleDash.Host.psm1`, so a new dash renames one word.
@@ -13,8 +17,6 @@ Changes are grouped by label: Feature, Bug/Fix, Redesign, Housekeeping. Every me
 
 **Housekeeping**
 - Contract checklist: "release workflow present" and "updater present"; `tools\Test-DashContract.ps1` reports both.
-
-## Released
 
 ### v0.8.0
 
