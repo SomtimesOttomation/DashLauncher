@@ -4,10 +4,12 @@ Changes are grouped by label: Feature, Bug/Fix, Redesign, Housekeeping. Every me
 
 ## Unreleased
 
+## Released
+
+### v0.10.0
+
 **Feature**
 - Media Library (Modern Media Library Manager) added to the catalog: it shows as a tab you can install once it is published.
-
-## Released
 
 ### v0.9.2
 
