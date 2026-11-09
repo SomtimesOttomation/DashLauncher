@@ -277,3 +277,4 @@ required one raises it, and the launcher keeps supporting the previous number fo
 - [ ] No `launcher.*` commands of its own, and no Ctrl+1 to Ctrl+9 or Ctrl+Tab shortcuts.
 - [ ] Scripts are ASCII-only (Windows PowerShell 5.1 misreads other characters).
 - [ ] The page uses the shared navigation bar in [docs/NAVBAR-SPEC.md](docs/NAVBAR-SPEC.md): same order, look and keys (Alt+Left/Right, mouse back/forward, F5) as NBADash. The bar is a look-and-feel standard, not part of the contract: the launcher never checks it.
+- [ ] Navigation bar docked flush under the week bar (no gap): nothing above `.navpill-row` has a bottom margin, and hidden bars (`#haltbar`, `#syncbar`, `#weekbar`) take no space.

@@ -4,6 +4,12 @@ Changes are grouped by label: Feature, Bug/Fix, Redesign, Housekeeping. Every me
 
 ## Unreleased
 
+**Bug/Fix**
+- Sample dash: navigation bar docks flush (no margin above it, hidden bars take no space), search ghost text lines up with the input and stays visible while typing (focus background moved to the search wrapper), pause bar text as in the spec.
+
+**Housekeeping**
+- Navigation bar spec updated to NBADash v0.21.0's (page order and docking rules, pause and sync bar styles); contract checklist gains "navigation bar docked flush".
+
 ## Released
 
 ### v0.10.0

@@ -124,7 +124,7 @@ function haltBar() {
   const b = $('#haltbar');
   b.hidden = !S.state.halted;
   if (!S.state.halted) { b.replaceChildren(); return; }
-  b.replaceChildren(h('span', null, 'Data refresh stopped. The dash will not fetch anything until you resume.'),
+  b.replaceChildren(h('span', null, 'Data refresh stopped. Sample Dash will not fetch data until you resume.'),
     h('button', { class: 'btn primary', type: 'button', onclick: () => S.resumeTraffic().catch((e) => toast(e.message)) }, 'Resume'));
 }
 

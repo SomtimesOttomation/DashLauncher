@@ -298,7 +298,7 @@ td.best .cmp-val.on-bar b { color: #12240b; }
 a.plink:hover { color: var(--accent2); }
 
 /* season week links under the team banner */
-.weekbar { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; padding: 6px 40px; background: var(--surface); border-bottom: 1px solid var(--line); font-size: 13px; }
+.weekbar { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; padding: 6px 40px; margin-bottom: 0; background: var(--surface); border-bottom: 1px solid var(--line); font-size: 13px; }
 .weekbar[hidden] { display: none; }
 .weekbar-label { color: var(--muted); text-transform: uppercase; letter-spacing: .06em; font-size: 11px; margin-right: 4px; }
 .weeklink { padding: 3px 10px; border-radius: 999px; color: var(--text); }
@@ -412,6 +412,9 @@ a.plink:hover { color: var(--accent2); }
 /* kill switch bar (DashLauncher) */
 .haltbar { display: flex; align-items: center; justify-content: center; gap: 12px; padding: 8px 16px; background: color-mix(in srgb, var(--live) 14%, var(--surface)); border-bottom: 1px solid var(--line); font-size: 13px; }
 .haltbar[hidden] { display: none; }
+/* NAVBAR-SPEC docking: a hidden bar takes no space, and nothing above .navpill-row has a bottom margin */
+.banner[hidden] { display: none; }
+.haltbar, .syncbar, .banner, .weekbar { margin-bottom: 0; }
 
 /* free agents */
 .tbl.fa th, .tbl.fa td { text-align: left; }
@@ -434,8 +437,9 @@ a.plink:hover { color: var(--accent2); }
 .np-sep { width: 1px; height: 20px; background: var(--line); margin: 0 6px 0 4px; }
 .navpill .psearch, .navpill .psearch input { margin: 0; background: transparent; }
 .navpill .psearch input { width: min(483px, 62vw) !important; border: 0; border-radius: 999px; padding: 8px 14px; }
-.navpill .psearch input:focus { outline: none; background: var(--surface2); }
-.navpill .psearch-ghost { padding: 9px 15px; }
+.navpill .psearch input:focus { outline: none; background: transparent; }   /* NAVBAR-SPEC: never a background on the input, or it hides the ghost text */
+.navpill .psearch:focus-within { background: var(--surface2); border-radius: 4px; }
+.navpill .psearch-ghost { padding: 9px 14px; font: inherit; }   /* NAVBAR-SPEC: 14px matches the input; 9px for line-height: normal */
 .navpill .psearch-results { left: 50%; transform: translateX(-50%); }
 .pow { display: grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); gap: 14px; margin-bottom: 4px; }
 .pow-note { margin: 6px 0 14px; font-size: 12.5px; }
