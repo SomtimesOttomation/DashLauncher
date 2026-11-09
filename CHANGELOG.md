@@ -4,6 +4,9 @@ Changes are grouped by label: Feature, Bug/Fix, Redesign, Housekeeping. Every me
 
 ## Unreleased
 
+**Bug/Fix**
+- Media Library's catalog tab uses its real icon instead of the placeholder.
+
 ## Released
 
 ### v0.10.1
