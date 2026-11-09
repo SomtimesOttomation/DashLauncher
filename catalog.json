@@ -16,6 +16,14 @@
       "repo": "SomtimesOttomation/NHLDash",
       "minVersion": "0.2.0",
       "icon": "ui/img/catalog/nhldash.svg"
+    },
+    {
+      "id": "mmlm",
+      "name": "Media",
+      "title": "Media Library",
+      "repo": "SomtimesOttomation/Modern-Media-Library-Manager",
+      "minVersion": "0.5.0",
+      "icon": "ui/img/catalog/mmlm.svg"
     }
   ]
 }
