@@ -1,0 +1,3 @@
+# probe results can hold personal data (account names, keys in error text): never commit them
+tools/probe-output/
+probe-output/

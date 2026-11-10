@@ -54,7 +54,10 @@ dash's own folder, so updates (the dash's own or DashLauncher's) never wipe them
      repo (`SomtimesOttomation/F1Dash` in `Update-F1Dash.ps1`) and its required-files list.
    - `sample` to your id (`f1dash`): `dash.json`, the lock name `Local\DashHost-sample`, host names `sample.ui` / `sample.cache`.
    - `Sample Dash` to your title in `dash.json` and `index.html`; `SAMPLEDASH_` test hooks to your name.
-4. In `dash.json`, list every data source and its terms in `dataSources` (keep the GitHub one for the updater).
+4. Before building any feed, check your candidate sources: follow `tools\DATA-SOURCE-CHECK.md` (report outline) and run
+   a copy of `tools\Probe-Source.ps1` per source (paced, keys never printed or saved, whitelisted fields only, account
+   names redacted, output in the git-ignored `tools\probe-output`). Then, in `dash.json`, list every data source and
+   its terms in `dataSources` (keep the GitHub one for the updater).
 5. In the backend, replace the worker's `Invoke-FakeServer` with real downloads (NHLDash's `Get-Bytes`) and the keys in
    `Resolve-DataKey` with your source's. Keep the rules: nothing fetched until the person asks, automatic refresh opt-in
    with a warning, a hidden tab fetches nothing on a timer, the pause switch stops everything but update checks.
