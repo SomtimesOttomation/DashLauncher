@@ -3,7 +3,8 @@
 import * as S from './store.js';
 import * as bridge from './bridge.js';
 import { h, ago } from './util.js';
-import { renderBanner, renderWeekBar } from './components.js';
+import { renderBanner, renderWeekBar, renderLeagueBar } from './components.js';
+import { initSearch } from './views/psearch.js';
 import * as home from './views/home.js';
 import * as teamV from './views/team.js';
 import * as standings from './views/standings.js';
@@ -35,11 +36,12 @@ function route() {
   S.newRoute();
   const ctx = { el: view, arg: arg ? decodeURIComponent(arg) : '' };
   current = { mod, ctx, cleanup: mod.mount(ctx) };
+  renderLeagueBar($('#leaguebar'));
   renderBanner($('#banner'), routeName === 'team' ? ctx.arg : '');
   renderWeekBar($('#weekbar'), routeName === 'week' ? +ctx.arg : 0);
   // what the opt-in refresh timer may refetch: today's scores, while they are on screen
   const t = S.todayKey();
-  bridge.request('watch.set', { keys: routeName === 'home' ? [`score:${t.slice(0, 4)}-${t.slice(4, 6)}-${t.slice(6, 8)}`] : [] }).catch(() => {});
+  bridge.request('watch.set', { keys: routeName === 'home' ? [`score:${S.state.league}:${t.slice(0, 4)}-${t.slice(4, 6)}-${t.slice(6, 8)}`] : [] }).catch(() => {});
   window.scrollTo(0, 0);
 }
 
@@ -144,19 +146,8 @@ $('#btn-refresh').addEventListener('click', async () => {
 });
 document.addEventListener('keydown', (e) => { if (e.key === 'F5') { e.preventDefault(); $('#btn-refresh').click(); } });
 
-// Search: each dash decides what it searches. The Sample searches teams and the players of team pages already loaded.
-const res = $('#psearch-results');
-$('#psearch').addEventListener('input', (e) => {
-  const q = e.target.value.trim().toLowerCase();
-  if (!q) { res.hidden = true; return; }
-  const items = S.state.teams.map((t) => ({ label: `${t.name} (${t.abbr})`, href: `#/team/${t.abbr}`, text: `${t.name} ${t.abbr}`.toLowerCase() }));
-  S.state.teamFiles.forEach((f, abbr) => (f?.players || []).forEach((p) => items.push({ label: `${p.name} · ${abbr}`, href: `#/team/${abbr}`, text: p.name.toLowerCase() })));
-  const hits = items.filter((x) => x.text.includes(q)).slice(0, 12);
-  res.replaceChildren(...(hits.length ? hits.map((x) => h('a', { href: x.href }, x.label)) : [h('div', { class: 'empty' }, 'No matches')]));
-  res.hidden = false;
-});
-res.addEventListener('click', () => { res.hidden = true; $('#psearch').value = ''; });
-document.addEventListener('click', (e) => { if (!e.target.closest('.psearch')) res.hidden = true; });
+// Search: views/psearch.js (NBADash's: ghost completion, "/" to focus, Esc to clear).
+initSearch();
 
 // Host messages, shown in Settings > Sample tools.
 const log = (text) => { hostLog.unshift({ t: new Date().toLocaleTimeString(), text }); hostLog.length = Math.min(hostLog.length, 8); };
@@ -169,6 +160,8 @@ S.subscribe((topics) => {
   if (topics.has('theme') || topics.has('settings')) themeIcon();
   if (topics.has('traffic')) { haltBar(); liveStatus(); }
   if (topics.has('settings') || topics.has('pretend')) liveStatus();
+  // another league opened: redraw the league bar, and re-open the current page so it asks for that league's data
+  if (topics.has('league')) { renderLeagueBar($('#leaguebar')); route(); return; }
   if (topics.has('teams') || topics.has('favorites')) renderBanner($('#banner'), location.hash.startsWith('#/team/') ? decodeURIComponent(location.hash.slice(7)) : '');
   if (topics.has('days')) renderWeekBar($('#weekbar'), location.hash.startsWith('#/week/') ? +location.hash.slice(7) : 0);
   if (topics.has('live') || topics.has('days')) liveStatus();

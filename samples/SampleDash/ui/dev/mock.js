@@ -4,11 +4,12 @@
 let emit = () => {};
 export function attach(fn) { emit = fn; }
 
-const CODES = ['AUR', 'BAY', 'CED', 'DUN', 'EMB', 'FOX', 'GLA', 'HAR', 'IRO', 'JUN', 'KES', 'LAN'];
+// Two made-up leagues, as in the backend: league keys carry the league (score:<lg>:<date>, week:<lg>:<monday>, standings:<lg>).
+const LEAGUES = { n: ['AUR', 'BAY', 'CED', 'DUN', 'EMB', 'FOX', 'GLA', 'HAR'], s: ['IRO', 'JUN', 'KES', 'LAN', 'MOR', 'NOR', 'OAK', 'PIN'] };
 const settings = { theme: new URLSearchParams(location.search).get('theme') || 'system', autoRefresh: false, autoAck: false, refreshSeconds: 60, favorites: [], updateCheck: false };
 const pretend = { live: 0, update: false, problem: false, fail: false };
 const traffic = { requests: 0, bytes: 0, errors: 0, byKind: {}, byHost: {}, last: [] };
-const saved = new Set();
+const saved = new Set();       // 'lg:monday' of saved weeks
 let halted = false;
 
 const seed = (s) => { let x = 17; for (const c of s) x = (x * 31 + c.charCodeAt(0)) % 2147483647; return () => (x = (x * 48271) % 2147483647) / 2147483647; };
@@ -16,16 +17,16 @@ const iso = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0
 const monday = (d) => { const x = new Date(d); x.setHours(12, 0, 0, 0); while (x.getDay() !== 1) x.setDate(x.getDate() - 1); return x; };
 const seasonStart = () => { const d = new Date(); d.setDate(d.getDate() - 42); return monday(d); };
 
-function day(dateIso) {
-  const rnd = seed(dateIso);
-  const codes = [...CODES].sort(() => rnd() - 0.5);
+function day(lg, dateIso) {
+  const rnd = seed(lg + dateIso);
+  const codes = [...LEAGUES[lg]].sort(() => rnd() - 0.5);
   const now = new Date(), isToday = dateIso === iso(now);
-  const n = 3 + Math.floor(rnd() * 3);
+  const n = 2 + Math.floor(rnd() * 3);
   const events = [];
   for (let i = 0; i < n; i++) {
     const start = isToday ? new Date(now.getTime() + [-180, -40, i * 60][Math.min(i, 2)] * 60000) : new Date(`${dateIso}T${18 + i}:00:00`);
-    let a = Math.floor(rnd() * 6), hm = Math.floor(rnd() * 6), ot = false;
-    if (a === hm) { hm++; ot = true; }
+    let a = Math.floor(rnd() * 5), hm = Math.floor(rnd() * 5), ot = false;
+    if (a === hm && rnd() < 0.5) { hm++; ot = true; }      // level: a draw, or extra time
     const mins = (now - start) / 60000;
     const state = dateIso < iso(now) || (isToday && mins >= 150) ? 'post' : isToday && mins >= 0 ? 'in' : 'pre';
     if (state === 'in') { a = Math.floor(a * mins / 150); hm = Math.floor(hm * mins / 150); ot = false; }
@@ -35,18 +36,19 @@ function day(dateIso) {
   }
   return { date: dateIso.replaceAll('-', ''), events };
 }
-function standings() {
-  const r = Object.fromEntries(CODES.map((c) => [c, { code: c, gp: 0, w: 0, l: 0, otl: 0, pts: 0, gf: 0, ga: 0, form: [] }]));
+function standings(lg) {
+  const r = Object.fromEntries(LEAGUES[lg].map((c) => [c, { code: c, gp: 0, w: 0, d: 0, l: 0, pts: 0, gf: 0, ga: 0, form: [] }]));
   for (let d = seasonStart(); iso(d) < iso(new Date()); d.setDate(d.getDate() + 1)) {
-    for (const e of day(iso(d)).events) {
-      const [aw, hm] = e.sides; const ot = e.period > 3;
+    for (const e of day(lg, iso(d)).events) {
+      const [aw, hm] = e.sides;
       for (const [me, op] of [[aw, hm], [hm, aw]]) {
         const t = r[me.abbr]; t.gp++; t.gf += +me.score; t.ga += +op.score;
-        if (+me.score > +op.score) { t.w++; t.pts += 2; t.form.push('W'); } else if (ot) { t.otl++; t.pts++; t.form.push('O'); } else { t.l++; t.form.push('L'); }
+        if (+me.score > +op.score) { t.w++; t.pts += 3; t.form.push('W'); } else if (+me.score === +op.score) { t.d++; t.pts++; t.form.push('D'); } else { t.l++; t.form.push('L'); }
       }
     }
   }
-  return { teams: Object.values(r).map((t) => { const f = t.form.slice(-10); delete t.form; return { ...t, l10: `${f.filter((x) => x === 'W').length}-${f.filter((x) => x === 'L').length}-${f.filter((x) => x === 'O').length}` }; }).sort((a, b) => b.pts - a.pts || (b.gf - b.ga) - (a.gf - a.ga)) };
+  const n = (f, x) => f.filter((y) => y === x).length;
+  return { league: lg, teams: Object.values(r).map((t) => { const f = t.form.slice(-10); delete t.form; return { ...t, l10: `${n(f, 'W')}-${n(f, 'D')}-${n(f, 'L')}` }; }).sort((a, b) => b.pts - a.pts || (b.gf - b.ga) - (a.gf - a.ga)) };
 }
 function teamFile(code) {
   const rnd = seed(code);
@@ -55,11 +57,11 @@ function teamFile(code) {
   return { code, players: players.sort((x, y) => y.pts - x.pts) };
 }
 function body(key) {
-  const [kind, arg] = key.split(':');
-  if (kind === 'score') return day(arg);
-  if (kind === 'week') { const m = new Date(`${arg}T12:00:00`); return { monday: arg, days: Array.from({ length: 7 }, (_, i) => { const d = new Date(m); d.setDate(d.getDate() + i); return day(iso(d)); }) }; }
-  if (kind === 'team') return teamFile(arg);
-  return standings();
+  const [kind, a, b] = key.split(':');
+  if (kind === 'team') return teamFile(a);
+  if (kind === 'score') return { league: a, ...day(a, b) };
+  if (kind === 'week') { const m = new Date(`${b}T12:00:00`); return { league: a, monday: b, days: Array.from({ length: 7 }, (_, i) => { const d = new Date(m); d.setDate(d.getDate() + i); return day(a, iso(d)); }) }; }
+  return standings(a);
 }
 function fetchKey(key) {
   setTimeout(() => {
@@ -76,18 +78,18 @@ function fetchKey(key) {
     const b = body(key); const n = JSON.stringify(b).length;
     traffic.bytes += n; traffic.byHost[host].bytes += n; traffic.byKind[kind].bytes += n;
     traffic.last.unshift({ at: new Date().toISOString(), key, bytes: n, ms: 180, ok: true }); traffic.last.length = Math.min(traffic.last.length, 40);
-    if (kind === 'week') saved.add(key.slice(5));
+    if (kind === 'week') saved.add(key.slice(5));     // 'lg:monday'
     emit('data', { key, ok: true, cached: false, at: new Date().toISOString(), body: b });
   }, 150);
 }
 const snap = () => ({ mode: 'standalone', version: '0.1.0', theme: '', settings, pretend, halted, live: pretend.live, today: iso(new Date()), traffic: { requests: traffic.requests, bytes: traffic.bytes, errors: traffic.errors } });
-function weeks() { const out = []; for (let d = seasonStart(); d <= new Date(); d.setDate(d.getDate() + 7)) out.push({ monday: iso(d), cached: saved.has(iso(d)) }); return out; }
+function weeks(lg) { const out = []; for (let d = seasonStart(); d <= new Date(); d.setDate(d.getDate() + 7)) out.push({ monday: iso(d), cached: saved.has(`${lg}:${iso(d)}`) }); return out; }
 
 export async function request(cmd, args = {}) {
   await new Promise((r) => setTimeout(r, 20));
   switch (cmd) {
     case 'init': return snap();
-    case 'season.weeks': return weeks();
+    case 'season.weeks': return weeks(args.league);
     case 'watch.set': return true;
     case 'data.get':
       if (halted) throw new Error('Data traffic is paused.');
@@ -99,13 +101,13 @@ export async function request(cmd, args = {}) {
     case 'traffic.stop': halted = true; emit('traffic', { stopped: true }); return snap();
     case 'traffic.resume': halted = false; emit('traffic', { stopped: false }); return snap();
     case 'sync.run': {
-      const w = weeks(); let i = 0;
+      const w = weeks(args.league); let i = 0;
       const step = () => { if (i >= w.length) { emit('sync', { running: false, pct: 100, exitCode: 0, summary: `${w.length} requests`, lastRun: new Date().toISOString() }); return; }
-        fetchKey(`week:${w[i].monday}`); i++; emit('sync', { running: true, pct: Math.round(100 * i / w.length), text: `Downloading ${i} of ${w.length}` }); setTimeout(step, 250); };
+        fetchKey(`week:${args.league}:${w[i].monday}`); i++; emit('sync', { running: true, pct: Math.round(100 * i / w.length), text: `Downloading ${i} of ${w.length}` }); setTimeout(step, 250); };
       setTimeout(step, 50); return { started: true, requests: w.length };
     }
     case 'sync.cancel': return true;
-    case 'cache.clear': saved.clear(); return true;
+    case 'cache.clear': [...saved].filter((k) => !args.league || k.startsWith(`${args.league}:`)).forEach((k) => saved.delete(k)); return true;
     case 'update.check': setTimeout(() => emit('update', { running: false, action: 'Check', result: { status: 'none' } }), 300); return true;
     default: throw new Error(`mock: unknown command ${cmd}`);
   }

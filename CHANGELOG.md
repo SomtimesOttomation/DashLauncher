@@ -4,6 +4,13 @@ Changes are grouped by label: Feature, Bug/Fix, Redesign, Housekeeping. Every me
 
 ## Unreleased
 
+**Feature**
+- Sample dash: several leagues in one dash, using FADash's rules: keys carry the league, a cache folder per league, favourites by club id, banner with favourites first then the open league's clubs, league bar, sync per league. A one-league dash keeps one entry and the bar hides.
+- Sample dash: NBADash's search box (ghost completion, "/" to focus, Esc to clear, arrows, recent picks).
+
+**Bug/Fix**
+- Sample dash: neutral period labels on game cards (no hockey terms), real draws in the pretend data, and a draw never dims either side.
+
 ## Released
 
 ### v0.10.2

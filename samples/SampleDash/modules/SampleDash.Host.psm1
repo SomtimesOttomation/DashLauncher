@@ -46,7 +46,14 @@ $script:WorkerHandle = $null
 $script:Pretend = @{ Live = 0; Update = $false; Problem = $false }
 
 # The made-up league. A real dash gets its teams from its data source.
-$script:TeamCodes = @('AUR', 'BAY', 'CED', 'DUN', 'EMB', 'FOX', 'GLA', 'HAR', 'IRO', 'JUN', 'KES', 'LAN')
+# Several competitions in one dash (FADash's pattern): every data key carries the league, each league has its own cache
+# folder, and clubs are keyed by id so favourites work across leagues. A one-league dash keeps a single entry here; the
+# page hides the league bar when there is only one.
+$script:Leagues = [ordered]@{
+    n = @('AUR', 'BAY', 'CED', 'DUN', 'EMB', 'FOX', 'GLA', 'HAR')
+    s = @('IRO', 'JUN', 'KES', 'LAN', 'MOR', 'NOR', 'OAK', 'PIN')
+}
+$script:TeamCodes = @($script:Leagues.Values | ForEach-Object { $_ })
 
 function New-DefaultSettings {
     return [ordered]@{ theme = 'system'; autoRefresh = $false; autoAck = $false; refreshSeconds = 60; favorites = @(); updateCheck = $false }
@@ -107,20 +114,24 @@ function Resolve-DataKey {
     param([string]$Key)
     $k = [string]$Key
     $today = (Get-Date).ToString('yyyy-MM-dd')
-    if ($k -match '^score:(\d{4}-\d{2}-\d{2})$') {
-        $ttl = if ($Matches[1] -lt $today) { 3600 } else { 15 }
-        return @{ Key = $k; Url = 'https://scores.sample.invalid/day/' + $Matches[1]; File = "score-$($Matches[1]).json"; Ttl = $ttl }
-    }
-    if ($k -match '^week:(\d{4}-\d{2}-\d{2})$') {
-        $d = [datetime]::ParseExact($Matches[1], 'yyyy-MM-dd', [Globalization.CultureInfo]::InvariantCulture)
+    # League keys: score:<lg>:<date>, week:<lg>:<monday>, standings:<lg>. Club keys: team:<club id> (no league).
+    # File is relative to the cache folder: one folder per league, so a league can be refreshed or deleted alone.
+    if ($k -cmatch '^(score|week|standings):([a-z]{1,4})(?::(\d{4}-\d{2}-\d{2}))?$' -and $script:Leagues.Contains($Matches[2])) {
+        $kind = $Matches[1]; $lg = $Matches[2]; $date = $Matches[3]
+        if ($kind -eq 'standings') { if ($date) { return $null }; return @{ Key = $k; Url = "https://scores.sample.invalid/$lg/standings"; File = (Join-Path $lg "standings.json"); Ttl = 600 } }
+        if (-not $date) { return $null }
+        if ($kind -eq 'score') {
+            $ttl = if ($date -lt $today) { 3600 } else { 15 }
+            return @{ Key = $k; Url = "https://scores.sample.invalid/$lg/day/$date"; File = (Join-Path $lg "score-$date.json"); Ttl = $ttl }
+        }
+        $d = [datetime]::ParseExact($date, 'yyyy-MM-dd', [Globalization.CultureInfo]::InvariantCulture)
         if ($d.DayOfWeek -ne 'Monday') { return $null }
         $ttl = if ($d.AddDays(8) -lt (Get-Date).Date) { 2592000 } else { 600 }     # finished weeks never change
-        return @{ Key = $k; Url = 'https://scores.sample.invalid/week/' + $Matches[1]; File = "week-$($Matches[1]).json"; Ttl = $ttl }
+        return @{ Key = $k; Url = "https://scores.sample.invalid/$lg/week/$date"; File = (Join-Path $lg "week-$date.json"); Ttl = $ttl }
     }
     if ($k -cmatch '^team:([A-Z]{3})$' -and $script:TeamCodes -ccontains $Matches[1]) {
-        return @{ Key = $k; Url = 'https://teams.sample.invalid/team/' + $Matches[1]; File = "team-$($Matches[1]).json"; Ttl = 1800 }
+        return @{ Key = $k; Url = 'https://teams.sample.invalid/team/' + $Matches[1]; File = (Join-Path 'teams' "team-$($Matches[1]).json"); Ttl = 1800 }
     }
-    if ($k -eq 'standings') { return @{ Key = $k; Url = 'https://scores.sample.invalid/standings'; File = 'standings.json'; Ttl = 600 } }
     return $null
 }
 
@@ -156,15 +167,15 @@ function Request-Data {
 
 # ---------------------------------------------------------------- worker runspace
 $script:WorkerScript = {
-    param($Shared, $Queue, $Out, $CacheDir, $TeamCodes)
+    param($Shared, $Queue, $Out, $CacheDir, $Leagues)
     $utf8 = New-Object Text.UTF8Encoding($false)
 
     # ---- the pretend servers. A real dash downloads here instead (NHLDash: Get-Bytes with HttpWebRequest). ----
     function Get-Seed([string]$Text) { $h = 17; foreach ($c in $Text.ToCharArray()) { $h = ($h * 31 + [int]$c) % 2147483647 }; return [int]$h }
-    function Get-DayGames([datetime]$Day) {
-        $rng = New-Object Random (Get-Seed $Day.ToString('yyyy-MM-dd'))
-        $codes = @($TeamCodes | Sort-Object { $rng.Next() })
-        $n = 3 + $rng.Next(3)
+    function Get-DayGames([string]$Lg, [datetime]$Day) {
+        $rng = New-Object Random (Get-Seed ($Lg + $Day.ToString('yyyy-MM-dd')))
+        $codes = @($Leagues[$Lg] | Sort-Object { $rng.Next() })
+        $n = 2 + $rng.Next(3)
         $now = Get-Date
         $isToday = $Day.Date -eq $now.Date
         $games = @()
@@ -173,8 +184,9 @@ $script:WorkerScript = {
             # today: one finished, one live, the rest later; other days: evening starts
             $start = if ($isToday) { @($now.AddHours(-3), $now.AddMinutes(-40), $now.AddHours($i))[[Math]::Min($i, 2)] } else { $Day.Date.AddHours(18 + $i).AddMinutes(30 * ($i % 2)) }
             $g = [ordered]@{ id = $Day.ToString('yyyyMMdd') + $i; start = $start.ToUniversalTime().ToString('o'); away = @{ code = $aw; score = $null; shots = $null }; home = @{ code = $hm; score = $null; shots = $null }; state = 'FUT'; clock = ''; ot = $false; venue = "$hm Arena" }
-            $a = $rng.Next(6); $h = $rng.Next(6)
-            if ($a -eq $h) { $h++; $g.ot = $true }
+            # A level score is either a draw or goes to extra time (ot); the page dims neither side of a draw.
+            $a = $rng.Next(5); $h = $rng.Next(5)
+            if ($a -eq $h -and $rng.Next(2) -eq 0) { $h++; $g.ot = $true }
             $minutes = ($now - $start).TotalMinutes
             if ($Day.Date -lt $now.Date -or ($isToday -and $minutes -ge 150)) { $g.state = 'FINAL' }
             elseif ($isToday -and $minutes -ge 0) {
@@ -199,23 +211,24 @@ $script:WorkerScript = {
         }
         return , @($out)
     }
-    function Get-Standings {
+    function Get-Standings([string]$Lg) {
+        # Neutral table: 3 points a win (extra time included), 1 a draw.
         $rec = @{}
-        foreach ($c in $TeamCodes) { $rec[$c] = [ordered]@{ code = $c; gp = 0; w = 0; l = 0; otl = 0; pts = 0; gf = 0; ga = 0; last10 = @() } }
+        foreach ($c in $Leagues[$Lg]) { $rec[$c] = [ordered]@{ code = $c; gp = 0; w = 0; d = 0; l = 0; pts = 0; gf = 0; ga = 0; last10 = @() } }
         $d = (Get-Date).Date.AddDays(-42); while ($d.DayOfWeek -ne 'Monday') { $d = $d.AddDays(-1) }
         while ($d -lt (Get-Date).Date) {
-            foreach ($g in (Get-DayGames $d)) {
+            foreach ($g in (Get-DayGames $Lg $d)) {
                 foreach ($side in @(@($g.away, $g.home), @($g.home, $g.away))) {
                     $me = $side[0]; $op = $side[1]; $r = $rec[$me.code]
                     $r.gp++; $r.gf += $me.score; $r.ga += $op.score
-                    if ($me.score -gt $op.score) { $r.w++; $r.pts += 2; $r.last10 += 'W' } elseif ($g.ot) { $r.otl++; $r.pts++; $r.last10 += 'O' } else { $r.l++; $r.last10 += 'L' }
+                    if ($me.score -gt $op.score) { $r.w++; $r.pts += 3; $r.last10 += 'W' } elseif ($me.score -eq $op.score) { $r.d++; $r.pts++; $r.last10 += 'D' } else { $r.l++; $r.last10 += 'L' }
                 }
             }
             $d = $d.AddDays(1)
         }
         $list = foreach ($r in $rec.Values) {
             $l10 = @($r.last10 | Select-Object -Last 10)
-            $r.l10 = '{0}-{1}-{2}' -f @($l10 | Where-Object { $_ -eq 'W' }).Count, @($l10 | Where-Object { $_ -eq 'L' }).Count, @($l10 | Where-Object { $_ -eq 'O' }).Count
+            $r.l10 = '{0}-{1}-{2}' -f @($l10 | Where-Object { $_ -eq 'W' }).Count, @($l10 | Where-Object { $_ -eq 'D' }).Count, @($l10 | Where-Object { $_ -eq 'L' }).Count
             $r.Remove('last10')
             [pscustomobject]$r
         }
@@ -236,10 +249,10 @@ $script:WorkerScript = {
         Start-Sleep -Milliseconds (120 + (Get-Random -Maximum 260))        # like a real request
         if ($Shared.FailDownloads) { throw 'Pretend download failure (Sample tools on the Settings page).' }
         $k = $Item.Key
-        $body = if ($k -match '^score:(.+)$') { $d = [datetime]$Matches[1]; @{ date = $d.ToString('yyyyMMdd'); events = (ConvertTo-Events (Get-DayGames $d)) } }
-                elseif ($k -match '^week:(.+)$') { $m = [datetime]$Matches[1]; @{ monday = $Matches[1]; days = @(0..6 | ForEach-Object { $d = $m.AddDays($_); @{ date = $d.ToString('yyyyMMdd'); events = (ConvertTo-Events (Get-DayGames $d)) } }) } }
+        $body = if ($k -match '^score:(\w+):(.+)$') { $lg = $Matches[1]; $d = [datetime]$Matches[2]; @{ league = $lg; date = $d.ToString('yyyyMMdd'); events = (ConvertTo-Events (Get-DayGames $lg $d)) } }
+                elseif ($k -match '^week:(\w+):(.+)$') { $lg = $Matches[1]; $m = [datetime]$Matches[2]; @{ league = $lg; monday = $Matches[2]; days = @(0..6 | ForEach-Object { $d = $m.AddDays($_); @{ date = $d.ToString('yyyyMMdd'); events = (ConvertTo-Events (Get-DayGames $lg $d)) } }) } }
                 elseif ($k -match '^team:(.+)$') { Get-Team $Matches[1] }
-                else { Get-Standings }
+                else { $lg = ($k -split ':')[1]; $t = Get-Standings $lg; $t.league = $lg; $t }
         return (ConvertTo-Json -InputObject $body -Depth 8 -Compress)
     }
 
@@ -261,8 +274,12 @@ $script:WorkerScript = {
             [void]$Shared.Last.Insert(0, @{ at = $t0.ToString('o'); key = $item.Key; host = $hostName; bytes = $len; ms = [int]((Get-Date) - $t0).TotalMilliseconds; ok = $true })
             while ($Shared.Last.Count -gt 40) { $Shared.Last.RemoveAt(40) }
             if ($Shared.Halted -or $item.Gen -ne $Shared.Gen) { continue }
-            [IO.File]::WriteAllText((Join-Path $CacheDir $item.File), $text, $utf8)
-            if ($item.Key -eq $Shared.TodayKey) { $Shared.Live = ([regex]::Matches($text, '"state":"in"')).Count }
+            $file = Join-Path $CacheDir $item.File
+            $dir = Split-Path $file -Parent
+            if (-not (Test-Path -LiteralPath $dir)) { [void](New-Item -ItemType Directory -Path $dir -Force) }
+            [IO.File]::WriteAllText($file, $text, $utf8)
+            # live games: today's score key of every league, added up
+            if ($item.Key -like 'score:*' -and $item.Key.EndsWith($Shared.Today)) { $Shared.LiveBy[$item.Key] = ([regex]::Matches($text, '"state":"in"')).Count; $Shared.Live = ($Shared.LiveBy.Values | Measure-Object -Sum).Sum }
             $head = '{{"event":"data","data":{{"key":"{0}","ok":true,"cached":false,"at":"{1}","body":' -f $item.Key, [datetime]::UtcNow.ToString('o')
             $Out.Enqueue($head + $text + '}}')
             $Shared.LastError = $null
@@ -285,7 +302,7 @@ function Start-WorkerRunspace {
     $ps = [PowerShell]::Create()
     $ps.Runspace = [RunspaceFactory]::CreateRunspace()
     $ps.Runspace.Open()
-    [void]$ps.AddScript($script:WorkerScript).AddArgument($script:Shared).AddArgument($script:Queue).AddArgument($script:Out).AddArgument($script:CacheDir).AddArgument($script:TeamCodes)
+    [void]$ps.AddScript($script:WorkerScript).AddArgument($script:Shared).AddArgument($script:Queue).AddArgument($script:Out).AddArgument($script:CacheDir).AddArgument($script:Leagues)
     $script:WorkerHandle = $ps.BeginInvoke()
     $script:Worker = $ps
 }
@@ -421,7 +438,7 @@ function Initialize-Dash {
     $script:Shared = [hashtable]::Synchronized(@{
         Quit = $false; Halted = $false; Gen = 0; Live = 0; Requests = 0; Bytes = [long]0; Errors = 0; LastError = $null; FailDownloads = $false
         Pending = [hashtable]::Synchronized(@{}); Skip = [hashtable]::Synchronized(@{}); ByHost = [hashtable]::Synchronized(@{}); ByKind = [hashtable]::Synchronized(@{})
-        Last = [System.Collections.ArrayList]::Synchronized((New-Object System.Collections.ArrayList)); Started = Get-Date; TodayKey = 'score:' + (Get-Date).ToString('yyyy-MM-dd')
+        Last = [System.Collections.ArrayList]::Synchronized((New-Object System.Collections.ArrayList)); Started = Get-Date; Today = (Get-Date).ToString('yyyy-MM-dd'); LiveBy = [hashtable]::Synchronized(@{})
     })
     $script:Queue = New-Object 'System.Collections.Concurrent.BlockingCollection[object]'
     $script:Out = New-Object 'System.Collections.Concurrent.ConcurrentQueue[string]'
@@ -457,6 +474,7 @@ function Invoke-DashCommand {
                 $snap = Get-Snapshot
                 $snap.updateNote = $script:UpdateNote
                 $snap.teams = $script:TeamCodes
+                $snap.leagues = @($script:Leagues.Keys | ForEach-Object { @{ id = $_; teams = $script:Leagues[$_] } })
                 Reply $id (ConvertTo-PageJson $snap)
                 if ($script:UpdateNote -and $script:UpdateNote.ok) {
                     # the page loaded: tell the update helper the new version works
@@ -544,22 +562,28 @@ function Invoke-DashCommand {
                 Reply $id (ConvertTo-PageJson (Get-Snapshot))
             }
             'season.weeks' {
-                $weeks = foreach ($w in (Get-SeasonWeeks)) { @{ monday = $w; cached = ($null -ne (Get-CacheAge "week-$w.json")) } }
+                # {league}: the season's Mondays and which are saved for that league
+                $lg = [string]$a.league
+                if (-not $script:Leagues.Contains($lg)) { ReplyError $id 'unknown league'; return }
+                $weeks = foreach ($w in (Get-SeasonWeeks)) { @{ monday = $w; cached = ($null -ne (Get-CacheAge (Join-Path $lg "week-$w.json"))) } }
                 Reply $id (ConvertTo-Json -InputObject @($weeks) -Compress)
             }
             'sync.run' {
                 if ($script:Shared.Halted) { ReplyError $id 'Data traffic is paused. Resume first.'; return }
                 if ($script:SyncKeys) { Reply $id 'false'; return }
+                # {league}: syncs one league (the open one); the others are untouched
+                $lg = [string]$a.league
+                if (-not $script:Leagues.Contains($lg)) { ReplyError $id 'unknown league'; return }
                 Start-WorkerRunspace
                 $script:Shared.Skip.Clear()
                 $weeks = Get-SeasonWeeks
                 $keys = @()
                 for ($i = 0; $i -lt $weeks.Count; $i++) {
-                    $spec = Resolve-DataKey ('week:' + $weeks[$i])
+                    $spec = Resolve-DataKey ("week:$($lg):" + $weeks[$i])
                     $r = Request-Data $spec ($i -eq $weeks.Count - 1)     # finished weeks come from the cache when saved
                     if ($r -ne 'cached') { $keys += $spec.Key }
                 }
-                if ((Request-Data (Resolve-DataKey 'standings') $true) -ne 'cached') { $keys += 'standings' }
+                if ((Request-Data (Resolve-DataKey "standings:$lg") $true) -ne 'cached') { $keys += "standings:$lg" }
                 $script:SyncKeys = $keys
                 $script:SyncTotal = [Math]::Max(1, $keys.Count)
                 $script:LastSyncPct = -1
@@ -583,7 +607,11 @@ function Invoke-DashCommand {
                 Reply $id (ConvertTo-Json -InputObject $obj -Depth 5 -Compress)
             }
             'cache.clear' {
-                Get-ChildItem -LiteralPath $script:CacheDir -File -ErrorAction SilentlyContinue | Where-Object { $_.Name -match '\.json$' } | Remove-Item -Force -ErrorAction SilentlyContinue
+                # {league}: only that league's folder; nothing: every saved file
+                $lg = [string]$a.league
+                if ($lg -and -not $script:Leagues.Contains($lg)) { ReplyError $id 'unknown league'; return }
+                $dir = if ($lg) { Join-Path $script:CacheDir $lg } else { $script:CacheDir }
+                Get-ChildItem -LiteralPath $dir -File -Recurse -ErrorAction SilentlyContinue | Where-Object { $_.Name -match '\.json$' } | Remove-Item -Force -ErrorAction SilentlyContinue
                 Reply $id 'true'
             }
             'traffic.stop' {
@@ -607,7 +635,8 @@ function Receive-DashEvents {
     <# Every 250 ms: runs the opt-in refresh timer and drains up to 25 worker messages. #>
     if (-not $script:Shared) { return @() }
     $now = Get-Date
-    $script:Shared.TodayKey = 'score:' + $now.ToString('yyyy-MM-dd')
+    $today = $now.ToString('yyyy-MM-dd')
+    if ($script:Shared.Today -ne $today) { $script:Shared.Today = $today; $script:Shared.LiveBy.Clear(); $script:Shared.Live = 0 }
     if ($now -ge $script:NextAuto) {
         if ($script:Visible -and $script:Settings.autoRefresh -and -not $script:Shared.Halted) {
             foreach ($k in $script:Watch) { $spec = Resolve-DataKey $k; if ($spec) { [void](Request-Data $spec $true) } }
@@ -676,12 +705,12 @@ function Stop-Dash {
 }
 
 function Invoke-DashSync {
-    <# Optional (master sync, switched off in the launcher for now): today's scores and the standings. #>
+    <# Optional (master sync, switched off in the launcher for now): today's scores and the table of every league. #>
     param([ValidateSet('quick')][string]$Scope = 'quick')
     if (-not $script:Shared -or $script:Shared.Halted) { return $false }
     if ($script:SyncKeys) { return $false }
     Start-WorkerRunspace
-    $keys = @('score:' + (Get-Date).ToString('yyyy-MM-dd'), 'standings')
+    $keys = @(foreach ($lg in $script:Leagues.Keys) { "score:$($lg):" + (Get-Date).ToString('yyyy-MM-dd'); "standings:$lg" })
     foreach ($k in $keys) { [void](Request-Data (Resolve-DataKey $k) $true) }
     $script:SyncKeys = $keys
     $script:SyncTotal = $keys.Count
