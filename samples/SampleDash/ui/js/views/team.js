@@ -4,21 +4,22 @@ import { h } from '../util.js';
 import { teamLogo, teamColor, starButton, emptyState, failNote } from '../components.js';
 import { calc } from '../formulas.js';
 
-export function mount(ctx) { S.loadTeamFile(ctx.arg); S.loadStandings(); draw(ctx); }
+// A club page uses its own league's table, whichever league is open.
+export function mount(ctx) { S.loadTeamFile(ctx.arg); const lg = S.team(ctx.arg)?.league; if (lg) S.loadStandings(false, lg); draw(ctx); }
 export function update(topics, ctx) { if (['team', 'standings', 'favorites', 'sync'].some((t) => topics.has(t))) draw(ctx); }
 
 function draw({ el, arg }) {
   const t = S.team(arg);
   if (!t) { el.replaceChildren(emptyState('Unknown team', arg)); return; }
   const file = S.state.teamFiles.get(arg);
-  const st = (S.state.standings?.teams || []).find((x) => x.code === arg);
+  const st = (S.standingsOf(t.league)?.teams || []).find((x) => x.code === arg);
   const hero = h('section', { class: 'card hero', style: { '--tc': teamColor(t) } },
     teamLogo(arg, 96),
     h('div', null,
       h('h1', null, t.name, ' ', starButton(arg)),
-      h('div', { class: 'meta' }, st ? `${st.w}-${st.l}-${st.otl} · ${st.pts} points` : ''),
+      h('div', { class: 'meta' }, [S.league(t.league)?.name, st ? `${st.w}-${st.d}-${st.l} · ${st.pts} points` : ''].filter(Boolean).join(' · ')),
       st ? h('dl', { class: 'kv', style: { marginTop: '8px' } },
-        h('dt', null, h('span', calc('ppct'), 'Points %')), h('dd', null, st.gp ? (st.pts / (2 * st.gp)).toFixed(3).replace(/^0/, '') : '–'),
+        h('dt', null, h('span', calc('ppct'), 'Points %')), h('dd', null, st.gp ? (st.pts / (3 * st.gp)).toFixed(3).replace(/^0/, '') : '–'),
         h('dt', null, h('span', calc('l10'), 'Last 10')), h('dd', null, st.l10)) : null));
   const err = S.keyError(`team:${arg}`);
   const head = (label, key) => h('th', null, key ? h('span', calc(key, 'player'), label) : label);

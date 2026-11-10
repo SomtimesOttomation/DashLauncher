@@ -36,11 +36,13 @@ export function teamName(abbr) {
 }
 
 // ---- status ------------------------------------------------------------------------------------
-// NBADash shows quarters (Q1-Q4, OT). The Sample's pretend sport has three periods; change this for your sport.
+// Neutral labels, so no sport's words leak into a new dash: 1st/2nd/3rd part, then ET (extra time). NBADash shows
+// Q1-Q4/OT, NHLDash P1-P3/OT, FADash HT/45+2'/FT/AET; change this (and statusInfo's FINAL text) for your sport.
+const ORD = ['', '1st', '2nd', '3rd'];
 export function periodLabel(p) {
   p = Number(p) || 0;
-  if (p <= 3) return `P${p}`;
-  return p === 4 ? 'OT' : `${p - 3}OT`;
+  if (p <= 3) return ORD[p] || '';
+  return p === 4 ? 'ET' : `ET${p - 3}`;
 }
 
 export function statusInfo(ev) {
@@ -48,7 +50,7 @@ export function statusInfo(ev) {
   if (ev.state === 'in') return { kind: 'live', text: `${periodLabel(ev.period)}${ev.clock ? ' ' + ev.clock : ''}`, label: 'LIVE' };
   if (ev.state === 'post') {
     const p = Number(ev.period) || 3;
-    return { kind: 'final', text: p > 3 ? `FINAL / ${periodLabel(p)}` : 'FINAL', label: '' };
+    return { kind: 'final', text: p > 3 ? 'FINAL / ET' : 'FINAL', label: '' };
   }
   const dayKey = etKey(new Date(ev.date));
   const when = dayKey === today ? fmtTime(ev.date) : `${fmtDayShort(ev.date)} ${fmtTime(ev.date)}`;
@@ -91,6 +93,7 @@ function sideRow(ev, sd, opts) {
   const scoreNum = num(sd.score);
   const other = ev.sides.find((x) => x !== sd);
   const oScore = other ? num(other.score) : NaN;
+  // Only a decided game dims its loser: a draw (level scores) dims neither side.
   const winner = ev.state === 'post' && Number.isFinite(scoreNum) && Number.isFinite(oScore) && scoreNum > oScore;
   const loser = ev.state === 'post' && Number.isFinite(scoreNum) && Number.isFinite(oScore) && scoreNum < oScore;
   const focus = opts.focus === sd.abbr;
@@ -133,6 +136,15 @@ export function renderWeekBar(el, activeWeek) {
     ...weeks.map((n) => h('a', { class: `weeklink ${n === activeWeek ? 'active' : ''}`, href: `#/week/${n}`, title: S.weekRangeLabel(n) }, `Week ${n}`)));
 }
 
+// League bar: one pill per competition, above the banner. Hidden when the dash has only one league.
+export function renderLeagueBar(el) {
+  el.hidden = S.state.leagues.length < 2;
+  el.replaceChildren(...S.state.leagues.map((l) => h('button', {
+    class: `league-pill ${l.id === S.state.league ? 'active' : ''}`, type: 'button', 'aria-pressed': l.id === S.state.league ? 'true' : 'false',
+    onclick: () => S.setLeague(l.id),
+  }, l.name)));
+}
+
 export function renderBanner(el, activeAbbr) {
   const { favorites, others } = S.orderedTeams();
   el.replaceChildren();
@@ -140,7 +152,9 @@ export function renderBanner(el, activeAbbr) {
   const tile = (t, isFav) => h('a', {
     class: `tile ${isFav ? 'fav' : ''} ${t.abbr === activeAbbr ? 'active' : ''}`, href: `#/team/${t.abbr}`, role: 'listitem',
     title: t.name, style: { '--tc': teamColor(t) },
-  }, starButton(t.abbr, 'tile-star'), teamLogo(t.abbr, 92), h('span', { class: 'tile-code' }, t.abbr));
+  }, starButton(t.abbr, 'tile-star'), teamLogo(t.abbr, 92), h('span', { class: 'tile-code' }, t.abbr),
+    // a favourite from another league carries its league's short name
+    t.league && t.league !== S.state.league ? h('span', { class: 'tile-league', title: S.league(t.league)?.name }, S.league(t.league)?.short || t.league) : null);
   favorites.forEach((t) => strip.append(tile(t, true)));
   if (favorites.length) strip.append(h('span', { class: 'banner-divider', 'aria-hidden': 'true' }));
   others.forEach((t) => strip.append(tile(t, false)));

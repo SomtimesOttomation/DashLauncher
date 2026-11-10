@@ -6,11 +6,11 @@ import { h } from './util.js';
 // key -> (scope) => { title, formula, why, note? }
 const DEFS = {
   gp: () => ({ title: 'Games played', formula: 'GP = games played so far', why: 'How many games the numbers next to it are based on. Early in the season small samples swing a lot.' }),
-  pts: () => ({ title: 'Points', formula: 'PTS = 2 \u00d7 W + 1 \u00d7 OTL', why: 'Standings points: a win is worth 2, an overtime loss 1, a regulation loss 0.' }),
-  ppct: () => ({ title: 'Points percentage', formula: 'P% = PTS / (2 \u00d7 GP)', why: 'Points earned out of points possible, so teams with games in hand compare fairly.' }),
-  otl: () => ({ title: 'Overtime losses', formula: 'OTL = losses after regulation time', why: 'Worth 1 point in the standings, unlike a regulation loss.' }),
+  pts: () => ({ title: 'Points', formula: 'PTS = 3 \u00d7 W + 1 \u00d7 D', why: 'Table points: a win (extra time included) is worth 3, a draw 1, a loss 0.' }),
+  ppct: () => ({ title: 'Points percentage', formula: 'P% = PTS / (3 \u00d7 GP)', why: 'Points earned out of points possible, so teams with games in hand compare fairly.' }),
+  d: () => ({ title: 'Draws', formula: 'D = games level at full time (not sent to extra time)', why: 'Worth 1 point each. A draw is not a defeat, so neither side is dimmed on its card.' }),
   diff: () => ({ title: 'Goal difference', formula: 'DIFF = Goals for \u2212 Goals against', why: 'How much a team outscores its opponents. A better sign of strength than the record when the record is close.' }),
-  l10: () => ({ title: 'Last 10', formula: 'Record in the last 10 games (W-L-OTL)', why: 'Recent form, which the season record can hide.' }),
+  l10: () => ({ title: 'Last 10', formula: 'Record in the last 10 games (W-D-L)', why: 'Recent form, which the season record can hide.' }),
   pm: () => ({ title: 'Plus / Minus', formula: '+/- = Team goals \u2212 Opponent goals while on the ice', why: 'Straight from the box score. Noisy over small samples and heavily tied to teammates.' }),
   sog: () => ({ title: 'Shots on goal', formula: 'SOG = shots that reached the goalie or went in', why: 'Volume of real chances; a missed or blocked shot does not count.' }),
 };

@@ -414,6 +414,13 @@ a.plink:hover { color: var(--accent2); }
 .haltbar[hidden] { display: none; }
 /* NAVBAR-SPEC docking: a hidden bar takes no space, and nothing above .navpill-row has a bottom margin */
 .banner[hidden] { display: none; }
+/* league bar (several competitions in one dash; hidden with one league) */
+.leaguebar { display: flex; gap: 6px; flex-wrap: wrap; padding: 8px 40px; margin-bottom: 0; background: var(--surface); border-bottom: 1px solid var(--line); }
+.leaguebar[hidden] { display: none; }
+.league-pill { border: 1px solid var(--line); background: transparent; color: var(--text); border-radius: 999px; padding: 5px 14px; font: inherit; font-size: 13px; cursor: pointer; }
+.league-pill:hover { background: var(--surface2); }
+.league-pill.active { background: var(--accent2); border-color: var(--accent2); color: #fff; font-weight: 700; }
+.tile-league { position: absolute; bottom: 2px; left: 50%; transform: translateX(-50%); font-size: 10px; color: var(--muted); background: var(--surface2); border-radius: 999px; padding: 0 6px; pointer-events: none; }
 .haltbar, .syncbar, .banner, .weekbar { margin-bottom: 0; }
 
 /* free agents */

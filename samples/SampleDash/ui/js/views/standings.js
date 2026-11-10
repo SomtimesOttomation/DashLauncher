@@ -7,16 +7,18 @@ import { calc } from '../formulas.js';
 export function mount(ctx) { S.loadStandings(); draw(ctx); }
 export function update(topics, ctx) { if (['standings', 'favorites'].some((t) => topics.has(t))) draw(ctx); }
 
-const COLS = [['GP', 'gp', 'gp'], ['W', 'w'], ['L', 'l'], ['OTL', 'otl', 'otl'], ['PTS', 'pts', 'pts'], ['P%', 'ppct', 'ppct'], ['GF', 'gf'], ['GA', 'ga'], ['DIFF', 'diff', 'diff'], ['L10', 'l10', 'l10']];
-const val = (t, k) => (k === 'ppct' ? (t.gp ? (t.pts / (2 * t.gp)).toFixed(3).replace(/^0/, '') : '–') : k === 'diff' ? `${t.gf - t.ga > 0 ? '+' : ''}${t.gf - t.ga}` : t[k]);
+// Neutral table: W 3 points (extra time included), D 1, L 0. Change the columns and points for your sport.
+
+const COLS = [['GP', 'gp', 'gp'], ['W', 'w'], ['D', 'd', 'd'], ['L', 'l'], ['PTS', 'pts', 'pts'], ['P%', 'ppct', 'ppct'], ['GF', 'gf'], ['GA', 'ga'], ['DIFF', 'diff', 'diff'], ['L10', 'l10', 'l10']];
+const val = (t, k) => (k === 'ppct' ? (t.gp ? (t.pts / (3 * t.gp)).toFixed(3).replace(/^0/, '') : '–') : k === 'diff' ? `${t.gf - t.ga > 0 ? '+' : ''}${t.gf - t.ga}` : t[k]);
 
 function draw({ el }) {
   const st = S.state.standings;
-  const err = S.keyError('standings');
+  const err = S.keyError(`standings:${S.state.league}`);
   if (!st) { el.replaceChildren(err ? failNote(err) : emptyState('Loading standings...', '')); return; }
   const fav = S.favSet();
   el.replaceChildren(
-    h('div', { class: 'section-head' }, h('h2', null, 'Standings', h('small', null, 'League'))),
+    h('div', { class: 'section-head' }, h('h2', null, 'Standings', h('small', null, S.league(S.state.league)?.name || ''))),
     h('div', { class: 'card scroll-x' }, h('table', { class: 'tbl' },
       h('thead', null, h('tr', null, h('th', null, 'Team'), COLS.map(([l, , c]) => h('th', null, c ? h('span', calc(c), l) : l)))),
       h('tbody', null, st.teams.map((t, i) => h('tr', { class: fav.has(t.code) ? 'me' : '', style: { cursor: 'pointer' }, onclick: () => { location.hash = `#/team/${t.code}`; } },

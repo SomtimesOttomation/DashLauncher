@@ -5,7 +5,7 @@ import { gameCard, sortEvents, sectionHead, emptyState, skeletonCards, failNote 
 
 export function mount(ctx) { draw(ctx); S.loadDay(S.todayKey()); S.loadDay(S.yesterdayKey()); S.loadStandings(); }
 export function update(topics, ctx) {
-  if (['days', 'favorites', 'teams', 'sync', 'standings', 'settings', 'live'].some((t) => topics.has(t))) draw(ctx);
+  if (['days', 'favorites', 'teams', 'sync', 'standings', 'settings', 'live', 'league'].some((t) => topics.has(t))) draw(ctx);
 }
 
 function section(key, title) {
@@ -31,10 +31,10 @@ function draw({ el }) {
   if (!S.state.settings.autoRefresh && S.state.host) {
     out.unshift(h('div', { class: 'card pad', style: { marginBottom: '18px', display: 'flex', gap: '12px', alignItems: 'center', flexWrap: 'wrap' } },
       h('span', null, h('b', null, 'Automatic refresh is off. '), 'Scores only update when you ask. Use the ', h('b', null, '↻'), ' button (or F5) for the latest scores, or '),
-      h('button', { class: 'btn', type: 'button', onclick: () => S.runSync().catch(() => {}) }, 'Sync the season'),
+      h('button', { class: 'btn', type: 'button', onclick: () => S.runSync().catch(() => {}) }, `Sync the ${S.league(S.state.league)?.name || 'season'}`),
       h('button', { class: 'btn', type: 'button', onclick: () => import('./settings.js').then((m) => m.openSettings()) }, 'Automatic refresh options')));
   }
-  const err = S.keyError(`score:${today.slice(0, 4)}-${today.slice(4, 6)}-${today.slice(6, 8)}`);
+  const err = S.keyError(`score:${S.state.league}:${today.slice(0, 4)}-${today.slice(4, 6)}-${today.slice(6, 8)}`);
   if (!sections.length) out.push(err ? failNote(err) : S.state.ready ? emptyState('Nothing loaded yet', 'Press the refresh button or F5.') : skeletonCards(6));
   el.replaceChildren(...out);
 }
