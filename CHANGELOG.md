@@ -4,10 +4,12 @@ Changes are grouped by label: Feature, Bug/Fix, Redesign, Housekeeping. Every me
 
 ## Unreleased
 
+## Released
+
+### v0.12.0
+
 **Feature**
 - Sample dash: data-source check before building feeds: a report outline (`tools/DATA-SOURCE-CHECK.md`) and a probe script template (`tools/Probe-Source.ps1`: paced requests, keys never printed or saved, whitelisted fields so odds never appear, account names redacted, output git-ignored).
-
-## Released
 
 ### v0.11.0
 
