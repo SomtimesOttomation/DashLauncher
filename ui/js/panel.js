@@ -102,12 +102,20 @@ function updateHtml(n) {
         `<div class="progress"><div style="width:${Math.max(2, u.pct || 0)}%"></div></div><p class="note">${esc(u.text || '')}</p>
          <div class="actions"><button class="btn" data-act="ucancel">Cancel</button></div>`;
       break;
-    case 'staged':
+    case 'staged': {
+      // With module checks on and modules ticked, one button does both: modules first, then DashLauncher, one restart.
+      const mods = (n.modules && n.modules.enabled) ? (n.modules.items || []).filter((i) => i.state === 'update' && !unticked.has(i.id)) : [];
+      const busy = n.modules && n.modules.run && (n.modules.run.status === 'updating' || n.modules.run.status === 'restarting');
+      const names = mods.map((i) => esc(i.name)).join(', ');
       body = head('download', 'info', `DashLauncher v${esc(u.latest)} is ready to install`) +
-        `<p>It was downloaded and its checksum matched. DashLauncher will close, replace its own files, and reopen.</p>
-         <p>Your dashboard modules and settings are not changed. If the new version doesn't start, the old one comes back by itself.</p>
-         <div class="actions"><button class="btn primary" data-act="uapply">Install and restart</button></div>`;
+        `<p>It was downloaded and its checksum matched. DashLauncher will close, replace its own files, and reopen.</p>` +
+        (mods.length
+          ? `<p>The ticked module update${mods.length === 1 ? '' : 's'} (${names}) ${mods.length === 1 ? 'goes' : 'go'} first, then DashLauncher installs and restarts once. A module that fails is put back as it was, and the result shows after the restart.</p>`
+          : `<p>Your dashboard modules and settings are not changed.</p>`) +
+        `<p>If the new version doesn't start, the old one comes back by itself.</p>
+         <div class="actions"><button class="btn primary" data-act="uapply" ${busy ? 'disabled' : ''}>${mods.length ? `Update ${mods.length} module${mods.length === 1 ? '' : 's'} and DashLauncher, restart once` : 'Install and restart'}</button></div>`;
       break;
+    }
     case 'current':
       body = head('folder', 'info', 'DashLauncher is up to date') + `<p>You have the latest version, v${esc(u.current)}.</p>
         <div class="actions"><button class="btn" data-act="ucheck">Check again</button></div>`;
@@ -247,7 +255,11 @@ root.addEventListener('click', async (e) => {
   const cmd = { install: 'catalog.install', uclose: 'update.close', ucheck: 'update.check', ustage: 'update.stage', ucancel: 'update.cancel', uapply: 'update.apply', reload: 'tab.reload', close: 'tab.close', retry: 'tab.retry', approve: 'tab.approve', switch: 'tab.switchTo', download: 'catalog.download', page: 'catalog.download', folder: 'modules.open', refresh: 'modules.scan' }[b.dataset.act];
   b.disabled = true;
   try {
-    const args = b.dataset.act === 'page' ? { id, page: true } : { id };
+    let args = b.dataset.act === 'page' ? { id, page: true } : { id };
+    if (b.dataset.act === 'uapply' && current && current.modules && current.modules.enabled) {
+      const mods = (current.modules.items || []).filter((i) => i.state === 'update' && !unticked.has(i.id)).map((i) => i.id);
+      if (mods.length) args = { modules: mods };
+    }
     const ok = await bridge.request(cmd, args, cmd === 'modules.scan' ? 600000 : 30000);
     if (b.dataset.act === 'refresh' && ok && !ok.added && root.dataset.kind === 'available') {
       const note = document.getElementById('note');

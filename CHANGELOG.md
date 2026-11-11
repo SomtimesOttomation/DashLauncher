@@ -6,6 +6,7 @@ Changes are grouped by label: Feature, Bug/Fix, Redesign, Housekeeping. Every me
 
 **Feature**
 - FA 2026-27 (FADash) added to the catalog: it shows as a tab you can install. Marked published while its repo is private.
+- Update page: when DashLauncher's own update is ready and module updates are ticked, one button updates the modules first, then DashLauncher, with a single restart. Module results show after the restart.
 
 ## Released
 
