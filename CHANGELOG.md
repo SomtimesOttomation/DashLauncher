@@ -4,6 +4,9 @@ Changes are grouped by label: Feature, Bug/Fix, Redesign, Housekeeping. Every me
 
 ## Unreleased
 
+**Feature**
+- Update page: when DashLauncher's own update is ready and module updates are ticked, one button updates the modules first, then DashLauncher, with a single restart. Module results show after the restart.
+
 ## Released
 
 ### v0.12.0

@@ -302,10 +302,11 @@ function Confirm-UpdateStarted {
         try { [IO.File]::WriteAllText((Join-Path $script:UpdDir 'update-ok.json'), '{"ok":true}', $script:Utf8) } catch { }
         Remove-Item (Join-Path $script:UpdDir 'update-pending.json') -Force -ErrorAction SilentlyContinue
         $script:Upd.status = 'current'
-        Show-Toast ("DashLauncher was updated to v{0}." -f $n.to)
+        Show-Toast (("DashLauncher was updated to v{0}. {1}" -f $n.to, $script:ModResultText).Trim())
     } else {
-        Show-Toast ("The update to v{0} did not work, so DashLauncher is back on v{1}. {2}" -f $n.to, $n.from, $n.reason)
+        Show-Toast (("The update to v{0} did not work, so DashLauncher is back on v{1}. {2} {3}" -f $n.to, $n.from, $n.reason, $script:ModResultText).Trim())
     }
+    $script:ModResultText = ''
 }
 
 # ---------------------------------------------------------------- one-click install of a catalog module (child process)
@@ -406,6 +407,8 @@ $script:ModResultPath = Join-Path $script:DataDir 'modupdate-result.json'
 $script:ModDonePath = Join-Path $script:DataDir 'module-update-done.json'
 $script:ModRun = @{ status = 'idle'; queue = @(); total = 0; index = 0; current = ''; pct = 0; text = ''; results = @{}; ok = 0 }
 $script:PendingModUpd = $null
+$script:ApplyAfterModules = $false    # "Install and restart" with modules ticked: update them first, then the launcher, one restart
+$script:ModResultText = ''
 $script:LastModJson = ''
 
 function Get-CatalogEntry { param([string]$Id) return ($script:Catalog | Where-Object { $_.Id -eq $Id } | Select-Object -First 1) }
@@ -507,13 +510,18 @@ function Complete-ModuleUpdateStart {
     try {
         if ($script:ModRun.status -eq 'updating' -or ($script:InstallProc -and -not $script:InstallProc.HasExited)) { Show-Toast 'Wait for the current install or update to finish.'; return }
         $pick = @(Get-ModuleUpdateItems | Where-Object { $_.state -eq 'update' -and $p.Ids -contains $_.id })
-        if (-not $pick.Count) { return }
+        if (-not $pick.Count) {
+            # nothing left to update among the ticked modules: install the launcher alone (one restart, as before)
+            if ($p.Launcher) { $err = Install-StagedUpdate; if ($err) { Show-Toast $err; return }; $answer = 'true'; [void]$form.BeginInvoke([Action]{ $form.Close() }) }
+            return
+        }
         $busy = @()
         foreach ($it in $pick) { $t = $script:ById[$it.id]; if ($t -and $t.State -eq 'ready' -and $t.Status -and $t.Status.Syncing) { $busy += "$($t.Name) is syncing" } }
         if ($busy.Count) {
             $q = "{0}.`n`nUpdating stops it. Update now?" -f ($busy -join ' and ')
             if ([Windows.Forms.MessageBox]::Show($q, $AppName, 'YesNo', 'Question') -ne 'Yes') { return }
         }
+        $script:ApplyAfterModules = [bool]$p.Launcher
         $script:ModRun = @{ status = 'updating'; queue = @($pick | ForEach-Object { $_.id }); total = $pick.Count; index = 0; current = ''; pct = 0; text = ''; results = @{}; ok = 0 }
         $answer = 'true'
     } finally {
@@ -580,6 +588,17 @@ function Watch-ModuleUpdate {
 function Complete-ModuleUpdates {
     $run = $script:ModRun
     $list = @(foreach ($k in $run.results.Keys) { $r = $run.results[$k]; $t = $script:ById[$k]; @{ id = $k; name = $(if ($t) { $t.Name } else { $k }); ok = [bool]$r.ok; from = [string]$r.from; to = [string]$r.to; error = [string]$r.error } })
+    if ($script:ApplyAfterModules) {
+        # Modules done (each updated or rolled back on its own); now the launcher itself. Apply-Update.ps1 waits for this
+        # process to end, swaps the launcher's files (never modules\), and starts it again: one restart for everything.
+        # The module results are shown after that restart, failures included.
+        $script:ApplyAfterModules = $false
+        if ($list.Count) { try { [IO.File]::WriteAllText($script:ModDonePath, (ConvertTo-Json -InputObject @{ results = $list } -Depth 4), $script:Utf8) } catch { } }
+        $err = Install-StagedUpdate
+        if (-not $err) { $run.status = 'restarting'; Send-ModuleUpdateState; $form.Close(); return }
+        Show-Toast ("The modules were updated, but DashLauncher could not install its own update: {0}" -f $err)
+        Remove-Item $script:ModDonePath -Force -ErrorAction SilentlyContinue
+    }
     if ($run.ok -gt 0) {
         try { [IO.File]::WriteAllText($script:ModDonePath, (ConvertTo-Json -InputObject @{ results = $list } -Depth 4), $script:Utf8) } catch { }
         $run.status = 'restarting'
@@ -604,6 +623,7 @@ function Show-ModuleUpdateResult {
     $text = ''
     if ($ok.Count) { $text = 'Updated ' + ($ok -join ', ') + '.' }
     if ($bad.Count) { $text = ($text + ' ' + ($bad -join ' ')).Trim() }
+    $script:ModResultText = $text       # after a combined update, the launcher's own result toast repeats it
     Show-Toast $text
     return $true
 }
@@ -1438,6 +1458,14 @@ function Invoke-LauncherCommand {
             & $reply 'true'
         }
         'update.apply' {
+            # {modules: [ids]} (optional): update those modules first, then install the launcher, with one restart in all
+            $ids = @(@($a.modules) | Where-Object { $_ -is [string] -and $_ -cmatch '^[a-z][a-z0-9]{1,19}$' })
+            if ($ids.Count -and $script:Settings.moduleUpdateCheck) {
+                if ($script:PendingModUpd) { & $reply 'false'; return }
+                $script:PendingModUpd = @{ View = $View; Id = [int]$Msg.id; Ids = $ids; Launcher = $true }
+                [void]$form.BeginInvoke([Action]{ Complete-ModuleUpdateStart })
+                return
+            }
             $err = Install-StagedUpdate
             if ($err) { & $fail $err; return }
             & $reply 'true'
