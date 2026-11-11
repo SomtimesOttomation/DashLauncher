@@ -4,6 +4,9 @@ Changes are grouped by label: Feature, Bug/Fix, Redesign, Housekeeping. Every me
 
 ## Unreleased
 
+**Feature**
+- FA 2026-27 (FADash) added to the catalog: it shows as a tab you can install. Marked published while its repo is private.
+
 ## Released
 
 ### v0.12.0
