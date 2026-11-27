@@ -84,7 +84,7 @@ $script:ModulesDir = Join-Path $Root 'modules'
 if (-not (Test-Path $script:ModulesDir)) { New-Item -ItemType Directory -Path $script:ModulesDir -Force | Out-Null }
 $script:Settings = [pscustomobject]@{
     settingsVersion = 2; scanFolders = @($script:ModulesDir); approved = @(); declined = @(); order = @(); lastTab = ''; theme = 'system'; bounds = $null
-    catalogCheck = $true; updateCheck = $true; moduleUpdateCheck = $false; glass = $false
+    catalogCheck = $true; updateCheck = $true; moduleUpdateCheck = $false; glass = $false; glassFrost = 0.6
 }
 if (Test-Path $script:SettingsPath) {
     try {
@@ -99,6 +99,7 @@ if (Test-Path $script:SettingsPath) {
         if ($loaded.updateCheck -is [bool]) { $script:Settings.updateCheck = $loaded.updateCheck }
         if ($loaded.moduleUpdateCheck -is [bool]) { $script:Settings.moduleUpdateCheck = $loaded.moduleUpdateCheck }
         if ($loaded.glass -is [bool]) { $script:Settings.glass = $loaded.glass }
+        if ($null -ne $loaded.glassFrost) { try { $script:Settings.glassFrost = [Math]::Round([Math]::Min(1, [Math]::Max(0, [double]$loaded.glassFrost)), 2) } catch { } }
     } catch { }
 }
 function Save-Settings {
@@ -972,7 +973,8 @@ function Set-Glass {
     foreach ($t in $script:Tabs) { if ($t.WebView) { Set-ViewGlass $t.WebView $on } }
     Set-WindowFrame -Force
 }
-function Get-HostTheme { return @{ theme = $script:Settings.theme; glass = (Test-GlassOn) } }
+# frost: 0 (lightest frost, most see-through) to 1 (almost solid), from the slider beside the Glass button
+function Get-HostTheme { return @{ theme = $script:Settings.theme; glass = (Test-GlassOn); frost = [double]$script:Settings.glassFrost } }
 
 function Show-Toast {
     param([string]$Text)
@@ -1056,7 +1058,7 @@ function Send-Event {
 $script:LastRailJson = ''
 function Push-RailState {
     $upd = $(if (@('available', 'staged', 'downloading') -contains $script:Upd.status) { $script:Upd.latest } else { '' })
-    $obj = @{ tabs = @($script:Tabs | ForEach-Object { ConvertTo-TabJson $_ }); active = $script:Active; theme = $script:Settings.theme; glass = (Test-GlassOn); glassOk = $script:GlassOk; launcherUpdate = $upd; overlay = [string]$script:PanelOverride }
+    $obj = @{ tabs = @($script:Tabs | ForEach-Object { ConvertTo-TabJson $_ }); active = $script:Active; theme = $script:Settings.theme; glass = (Test-GlassOn); glassOk = $script:GlassOk; frost = [double]$script:Settings.glassFrost; launcherUpdate = $upd; overlay = [string]$script:PanelOverride }
     $json = ConvertTo-Json -InputObject @{ event = 'tabs'; data = $obj } -Depth 8 -Compress
     if ($json -ne $script:LastRailJson) { $script:LastRailJson = $json; Send-View $rail $json }
 }
@@ -1513,7 +1515,7 @@ function Invoke-LauncherCommand {
             Save-Settings
             & $reply 'true'
         }
-        'panel.get' { & $reply (ConvertTo-Json -InputObject @{ notice = (Get-Notice); theme = $script:Settings.theme; glass = (Test-GlassOn) } -Depth 6 -Compress) }
+        'panel.get' { & $reply (ConvertTo-Json -InputObject @{ notice = (Get-Notice); theme = $script:Settings.theme; glass = (Test-GlassOn); frost = [double]$script:Settings.glassFrost } -Depth 6 -Compress) }
         'tab.select' {
             $t = & $tabArg
             if (-not $t) { & $fail 'unknown tab'; return }
@@ -1594,10 +1596,13 @@ function Invoke-LauncherCommand {
         }
         'glass.set' {
             if (-not $script:GlassOk) { & $fail 'Glass needs Windows 11 (22H2 or later).'; return }
-            $script:Settings.glass = [bool]$a.on
+            # {on} turns glass on or off; {frost} (0-1) sets how see-through it is. Either or both.
+            $wasOn = Test-GlassOn
+            if ($null -ne $a.on) { $script:Settings.glass = [bool]$a.on }
+            if ($null -ne $a.frost) { try { $script:Settings.glassFrost = [Math]::Round([Math]::Min(1, [Math]::Max(0, [double]$a.frost)), 2) } catch { & $fail 'bad frost'; return } }
             Save-Settings
             & $reply 'true'
-            Set-Glass
+            if ((Test-GlassOn) -ne $wasOn) { Set-Glass }
             foreach ($t in $script:Tabs) { if ($t.State -eq 'ready') { Send-Event $t.WebView 'host.theme' (Get-HostTheme) } }
             Send-Event $panelView 'theme' (Get-HostTheme)
             Push-RailState

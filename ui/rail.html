@@ -15,7 +15,14 @@
       <button id="btn-scan" class="rail-btn" type="button" title="Scan for modules" aria-label="Scan for modules"></button>
       <button id="btn-restart" class="rail-btn" type="button" title="Restart &amp; Reload DashLauncher (reads the modules folder again)" aria-label="Restart and reload DashLauncher"></button>
       <button id="btn-theme" class="rail-btn" type="button" aria-label="Theme"></button>
-      <button id="btn-glass" class="rail-btn" type="button" aria-label="Glass" aria-pressed="false" hidden></button>
+      <div class="glass-wrap">
+        <div id="glass-pop" class="glass-pop" role="dialog" aria-label="Glass settings" hidden>
+          <span class="gp-lab">Frost</span>
+          <input id="glass-frost" type="range" min="0" max="1" step="0.05" aria-label="Frost: low is more see-through">
+          <button id="glass-off" class="gp-off" type="button">Off</button>
+        </div>
+        <button id="btn-glass" class="rail-btn" type="button" aria-label="Glass" aria-pressed="false" aria-haspopup="dialog" hidden></button>
+      </div>
       <button id="btn-kill" class="rail-btn kill" type="button" title="Stop all traffic to data sources (update checks keep working)" aria-label="Stop all data traffic"></button>
       <button id="ver" class="rail-ver" type="button" title="DashLauncher updates"></button>
     </div>
