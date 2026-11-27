@@ -58,7 +58,8 @@ export async function request(cmd, args = {}, timeoutMs = 30000) {
   });
 }
 
-export function setTheme(theme, glass) {
+export function setTheme(theme, glass, frost) {
+  if (typeof frost === 'number') document.documentElement.style.setProperty('--frost', String(Math.min(1, Math.max(0, frost))));
   document.documentElement.dataset.theme = theme || 'system';
   // glass (Windows 11 Acrylic): the host made this view transparent; launcher.css switches to translucent surfaces
   if (glass !== undefined) {

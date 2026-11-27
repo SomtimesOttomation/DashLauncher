@@ -55,7 +55,7 @@ export async function request(cmd, args) {
       window.__lastOrder = args.ids;
       return true;
     }
-    case 'glass.set': glass = !!args.on; setTimeout(() => emit('tabs', { tabs, active, theme, glassOk: true, glass }), 10); return true;
+    case 'glass.set': if (args.on !== undefined) glass = !!args.on; setTimeout(() => emit('tabs', { tabs, active, theme, glassOk: true, glass }), 10); return true;
     case 'tab.select': active = args.id; setTimeout(() => emit('tabs', { tabs, active, theme, glassOk: true, glass }), 10); return true;
     case 'theme.set': theme = args.theme; return true;
     case 'app.restart': return window.confirm('Mock: restart DashLauncher?') ? true : false;

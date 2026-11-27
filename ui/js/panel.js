@@ -281,12 +281,12 @@ bridge.on('notice', render);
 bridge.on('install', (st) => { if (current && current.kind === 'available' && current.id === st.id && st.status !== 'installed') render({ ...current, install: st }); });
 bridge.on('update', (u) => { if (current && current.kind === 'update') render({ ...current, update: u }); });
 bridge.on('modules', (m) => { if (current && current.kind === 'update') render({ ...current, modules: m }); });
-bridge.on('theme', (d) => bridge.setTheme(d && d.theme, !!(d && d.glass)));
+bridge.on('theme', (d) => bridge.setTheme(d && d.theme, !!(d && d.glass), d && d.frost));
 
 (async () => {
   try {
     const r = await bridge.request('panel.get');
-    bridge.setTheme(r.theme, !!r.glass);
+    bridge.setTheme(r.theme, !!r.glass, r.frost);
     render(r.notice);
   } catch (err) { console.warn(err.message); }
 })();

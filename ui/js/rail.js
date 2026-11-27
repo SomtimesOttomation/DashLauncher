@@ -22,12 +22,14 @@ const STATE_TEXT = {
 const tabsEl = document.getElementById('tabs');
 const themeBtn = document.getElementById('btn-theme');
 const glassBtn = document.getElementById('btn-glass');
+const glassPop = document.getElementById('glass-pop');
+const glassFrost = document.getElementById('glass-frost');
 const killBtn = document.getElementById('btn-kill');
 const scanBtn = document.getElementById('btn-scan');
 const restartBtn = document.getElementById('btn-restart');
 const verEl = document.getElementById('ver');
 
-let state = { tabs: [], active: '', theme: 'system', glass: false, glassOk: false, launcherUpdate: '', overlay: '' };
+let state = { tabs: [], active: '', theme: 'system', glass: false, glassOk: false, frost: 0.6, launcherUpdate: '', overlay: '' };
 let version = '';
 
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -67,13 +69,15 @@ function render() {
   verEl.title = state.launcherUpdate ? `DashLauncher v${state.launcherUpdate} is available` : 'DashLauncher updates';
   themeBtn.innerHTML = ICON[state.theme] || ICON.system;
   themeBtn.title = THEME_LABEL[state.theme] || THEME_LABEL.system;
-  bridge.setTheme(state.theme, state.glass);
+  bridge.setTheme(state.theme, state.glass, state.frost);
+  if (document.activeElement !== glassFrost) glassFrost.value = String(state.frost ?? 0.6);
+  if (!state.glass) glassPop.hidden = true;
   // Glass: Windows 11 only (the host says whether it can); shown as a toggle under the theme button
   glassBtn.hidden = !state.glassOk;
   glassBtn.innerHTML = ICON.glass;
   glassBtn.setAttribute('aria-pressed', state.glass ? 'true' : 'false');
   glassBtn.classList.toggle('on', !!state.glass);
-  glassBtn.title = state.glass ? 'Glass: on (click to turn off)' : 'Glass: see-through window (Windows 11)';
+  glassBtn.title = state.glass ? 'Glass: on (click for frost and off)' : 'Glass: see-through window (Windows 11)';
 }
 
 // ---- drag to reorder: press on a tab and move it up or down; the order is saved by the launcher.
@@ -163,11 +167,24 @@ themeBtn.addEventListener('click', () => {
   bridge.request('theme.set', { theme: next }).catch((err) => console.warn(err.message));
 });
 
-glassBtn.addEventListener('click', () => {
-  state.glass = !state.glass;
-  render();
-  bridge.request('glass.set', { on: state.glass }).catch((err) => { console.warn(err.message); state.glass = !state.glass; render(); });
+// Glass: off -> click turns it on. On -> click (or right-click) opens a small panel with the Frost slider and Off.
+const setGlass = (on) => {
+  state.glass = on; render();
+  bridge.request('glass.set', { on }).catch((err) => { console.warn(err.message); state.glass = !on; render(); });
+};
+const openPop = () => { glassPop.hidden = false; glassFrost.focus(); };
+glassBtn.addEventListener('click', () => { if (!state.glass) { setGlass(true); return; } if (glassPop.hidden) openPop(); else glassPop.hidden = true; });
+glassBtn.addEventListener('contextmenu', (e) => { e.preventDefault(); if (state.glass) openPop(); });
+document.getElementById('glass-off').addEventListener('click', () => { glassPop.hidden = true; setGlass(false); });
+let frostRaf = 0;
+glassFrost.addEventListener('input', () => {
+  state.frost = Number(glassFrost.value);
+  bridge.setTheme(state.theme, state.glass, state.frost);        // the rail follows at once
+  if (frostRaf) return;
+  frostRaf = requestAnimationFrame(() => { frostRaf = 0; bridge.request('glass.set', { frost: state.frost }).catch(() => {}); });
 });
+document.addEventListener('pointerdown', (e) => { if (!glassPop.hidden && !e.target.closest('.glass-wrap')) glassPop.hidden = true; });
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !glassPop.hidden) { glassPop.hidden = true; glassBtn.focus(); } });
 
 scanBtn.innerHTML = ICON.scan;
 scanBtn.addEventListener('click', async () => {
