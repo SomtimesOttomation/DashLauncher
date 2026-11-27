@@ -53,6 +53,8 @@ Add-Type -Namespace DashLauncher -Name Native -MemberDefinition @'
 [System.Runtime.InteropServices.DllImport("user32.dll")] public static extern bool ShowWindow(System.IntPtr hWnd, int nCmdShow);
 [System.Runtime.InteropServices.DllImport("user32.dll")] public static extern bool IsIconic(System.IntPtr hWnd);
 [System.Runtime.InteropServices.DllImport("dwmapi.dll")] public static extern int DwmSetWindowAttribute(System.IntPtr hWnd, int attr, ref int value, int size);
+[System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential)] public struct MARGINS { public int Left; public int Right; public int Top; public int Bottom; }
+[System.Runtime.InteropServices.DllImport("dwmapi.dll")] public static extern int DwmExtendFrameIntoClientArea(System.IntPtr hWnd, ref MARGINS m);
 '@
 [DashLauncher.Native]::SetDllDirectory($lib) | Out-Null       # lets .NET find WebView2Loader.dll
 Add-Type -Path (Join-Path $lib 'Microsoft.Web.WebView2.Core.dll')
@@ -82,7 +84,7 @@ $script:ModulesDir = Join-Path $Root 'modules'
 if (-not (Test-Path $script:ModulesDir)) { New-Item -ItemType Directory -Path $script:ModulesDir -Force | Out-Null }
 $script:Settings = [pscustomobject]@{
     settingsVersion = 2; scanFolders = @($script:ModulesDir); approved = @(); declined = @(); order = @(); lastTab = ''; theme = 'system'; bounds = $null
-    catalogCheck = $true; updateCheck = $true; moduleUpdateCheck = $false
+    catalogCheck = $true; updateCheck = $true; moduleUpdateCheck = $false; glass = $false
 }
 if (Test-Path $script:SettingsPath) {
     try {
@@ -96,6 +98,7 @@ if (Test-Path $script:SettingsPath) {
         if ($loaded.catalogCheck -is [bool]) { $script:Settings.catalogCheck = $loaded.catalogCheck }
         if ($loaded.updateCheck -is [bool]) { $script:Settings.updateCheck = $loaded.updateCheck }
         if ($loaded.moduleUpdateCheck -is [bool]) { $script:Settings.moduleUpdateCheck = $loaded.moduleUpdateCheck }
+        if ($loaded.glass -is [bool]) { $script:Settings.glass = $loaded.glass }
     } catch { }
 }
 function Save-Settings {
@@ -933,11 +936,44 @@ function Set-WindowFrame {
     $on = [int]$dark
     if ((& $set 20 $on) -ne 0) { [void](& $set 19 $on) }          # dark mode (19 on Windows 10 before 20H1)
     [void](& $set 33 2)                                             # rounded corners (Windows 11)
-    # COLORREF is 0x00BBGGRR: the --bg and --text colours from launcher.css
-    if ($dark) { [void](& $set 35 0x0017100D); [void](& $set 36 0x00F4ECE8) }
+    # COLORREF is 0x00BBGGRR: the --bg and --text colours from launcher.css. With glass on, the caption keeps the
+    # system default (-1) so the backdrop shows through the title bar too.
+    if (Test-GlassOn) { [void](& $set 35 -1); [void](& $set 36 $(if ($dark) { 0x00F4ECE8 } else { 0x00221713 })) }
+    elseif ($dark) { [void](& $set 35 0x0017100D); [void](& $set 36 0x00F4ECE8) }
     else { [void](& $set 35 0x00F8F5F4); [void](& $set 36 0x00221713) }
     [void](& $set 34 $(if ($dark) { 0x003E2F27 } else { 0x00EAE3DF }))   # border colour: --line
 }
+# ---------------------------------------------------------------- glass (Windows 11 Acrylic backdrop, opt-in)
+# Off by default. With it on, Windows draws a blurred, tinted copy of the desktop behind the window (the Acrylic system
+# backdrop, Windows 11 22H2 and later). The launcher extends that backdrop over its whole client area, paints its own
+# surfaces black (which DWM treats as see-through), and makes its WebView2s transparent, so the rail and notice pages,
+# which use translucent colours under [data-glass], show it. Dash pages get {glass:true} in host.theme and their view is
+# transparent too; a dash that keeps its own solid background simply stays solid. Older Windows: the setting is hidden.
+$script:GlassOk = ([Environment]::OSVersion.Version.Build -ge 22621)
+function Test-GlassOn { return [bool]($script:GlassOk -and $script:Settings.glass) }
+function Set-ViewGlass {
+    param($View, [bool]$On)
+    if (-not $View) { return }
+    try { $View.DefaultBackgroundColor = $(if ($On) { [Drawing.Color]::Transparent } else { [Drawing.Color]::White }) } catch { }
+}
+function Set-Glass {
+    if (-not $form.IsHandleCreated) { return }
+    $on = Test-GlassOn
+    $h = $form.Handle
+    $v = $(if ($on) { 3 } else { 1 })                      # DWMWA_SYSTEMBACKDROP_TYPE: 3 = Acrylic (transient window), 1 = none
+    try { [void][DashLauncher.Native]::DwmSetWindowAttribute($h, 38, [ref]$v, 4) } catch { }
+    $m = New-Object DashLauncher.Native+MARGINS
+    $n = $(if ($on) { -1 } else { 0 })
+    $m.Left = $n; $m.Right = $n; $m.Top = $n; $m.Bottom = $n
+    try { [void][DashLauncher.Native]::DwmExtendFrameIntoClientArea($h, [ref]$m) } catch { }
+    $bg = $(if ($on) { [Drawing.Color]::Black } else { [Drawing.Color]::Empty })
+    $form.BackColor = $bg; $content.BackColor = $bg
+    Set-ViewGlass $rail $on; Set-ViewGlass $panelView $on
+    foreach ($t in $script:Tabs) { if ($t.WebView) { Set-ViewGlass $t.WebView $on } }
+    Set-WindowFrame -Force
+}
+function Get-HostTheme { return @{ theme = $script:Settings.theme; glass = (Test-GlassOn) } }
+
 function Show-Toast {
     param([string]$Text)
     if (-not $Text) { return }
@@ -1020,7 +1056,7 @@ function Send-Event {
 $script:LastRailJson = ''
 function Push-RailState {
     $upd = $(if (@('available', 'staged', 'downloading') -contains $script:Upd.status) { $script:Upd.latest } else { '' })
-    $obj = @{ tabs = @($script:Tabs | ForEach-Object { ConvertTo-TabJson $_ }); active = $script:Active; theme = $script:Settings.theme; launcherUpdate = $upd; overlay = [string]$script:PanelOverride }
+    $obj = @{ tabs = @($script:Tabs | ForEach-Object { ConvertTo-TabJson $_ }); active = $script:Active; theme = $script:Settings.theme; glass = (Test-GlassOn); glassOk = $script:GlassOk; launcherUpdate = $upd; overlay = [string]$script:PanelOverride }
     $json = ConvertTo-Json -InputObject @{ event = 'tabs'; data = $obj } -Depth 8 -Compress
     if ($json -ne $script:LastRailJson) { $script:LastRailJson = $json; Send-View $rail $json }
 }
@@ -1190,6 +1226,7 @@ function New-DashView {
     $wv.CreationProperties = $p
     $wv.Dock = 'Fill'
     $wv.Tag = $Tab.Id
+    Set-ViewGlass $wv (Test-GlassOn)
     $wv.Visible = ($script:Active -eq $Tab.Id)
     $content.Controls.Add($wv)
     $wv.BringToFront()
@@ -1213,7 +1250,7 @@ function New-DashView {
     })
     $wv.add_NavigationCompleted({
         param($s, $a)
-        Send-Event $s 'host.theme' @{ theme = $script:Settings.theme }
+        Send-Event $s 'host.theme' (Get-HostTheme)
         try { [void]$s.CoreWebView2.ExecuteScriptAsync($script:KeyScript) } catch { }
     })
     $Tab.WebView = $wv
@@ -1476,7 +1513,7 @@ function Invoke-LauncherCommand {
             Save-Settings
             & $reply 'true'
         }
-        'panel.get' { & $reply (ConvertTo-Json -InputObject @{ notice = (Get-Notice); theme = $script:Settings.theme } -Depth 6 -Compress) }
+        'panel.get' { & $reply (ConvertTo-Json -InputObject @{ notice = (Get-Notice); theme = $script:Settings.theme; glass = (Test-GlassOn) } -Depth 6 -Compress) }
         'tab.select' {
             $t = & $tabArg
             if (-not $t) { & $fail 'unknown tab'; return }
@@ -1548,11 +1585,21 @@ function Invoke-LauncherCommand {
             Save-Settings
             foreach ($t in $script:Tabs) {
                 if ($t.Ctx) { $t.Ctx.Theme = $th }
-                if ($t.State -eq 'ready') { Send-Event $t.WebView 'host.theme' @{ theme = $th } }
+                if ($t.State -eq 'ready') { Send-Event $t.WebView 'host.theme' (Get-HostTheme) }
             }
-            Send-Event $panelView 'theme' @{ theme = $th }
+            Send-Event $panelView 'theme' (Get-HostTheme)
             & $reply 'true'
             Set-WindowFrame
+            Push-RailState
+        }
+        'glass.set' {
+            if (-not $script:GlassOk) { & $fail 'Glass needs Windows 11 (22H2 or later).'; return }
+            $script:Settings.glass = [bool]$a.on
+            Save-Settings
+            & $reply 'true'
+            Set-Glass
+            foreach ($t in $script:Tabs) { if ($t.State -eq 'ready') { Send-Event $t.WebView 'host.theme' (Get-HostTheme) } }
+            Send-Event $panelView 'theme' (Get-HostTheme)
             Push-RailState
         }
         'modules.scan' {
@@ -1648,7 +1695,7 @@ $timer.add_Tick({
 })
 
 # ---------------------------------------------------------------- start and close
-$form.add_HandleCreated({ Set-WindowFrame -Force })
+$form.add_HandleCreated({ Set-WindowFrame -Force; Set-Glass })
 $form.add_Shown({
     Set-WindowFrame -Force
     [void](Update-Tabs)

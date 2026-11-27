@@ -198,9 +198,15 @@ The host also pushes these to the page. A page that ignores them still works.
 | --- | --- | --- |
 | `host.visible` | `{}` | the tab is shown again after being hidden |
 | `host.hidden` | `{}` | the tab is hidden |
-| `host.theme` | `{ "theme": "dark" }` | the launcher theme changes, and once after load in launcher mode |
+| `host.theme` | `{ "theme": "dark", "glass": false }` | the launcher theme or glass setting changes, and once after load in launcher mode |
 
 In launcher mode a dash hides its own theme toggle and follows `host.theme`.
+
+`glass` (optional, added in DashLauncher 0.14.0; older launchers leave it out) is `true` while the person has the
+launcher's Glass setting on (Windows 11). The dash's view is then transparent and the desktop shows through, blurred, behind
+the page. A dash that supports glass makes its page background transparent and its cards and bars translucent while
+`glass` is true (for example under `:root[data-glass]`); a dash that ignores it keeps its own solid background and
+looks exactly as before. Glass is a look, never a requirement: text must stay readable on any wallpaper.
 On `host.visible` a dash refetches only if its own automatic refresh setting is on; otherwise it shows how old its data
 is and waits for the person to refresh.
 

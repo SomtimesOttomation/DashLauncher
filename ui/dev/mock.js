@@ -38,13 +38,15 @@ const notices = {
   empty: { kind: 'empty', modulesDir: 'C:\\Tools\\DashLauncher\\modules', scanFolders: ['C:\\Tools\\DashLauncher\\modules'] },
 };
 
+// ?glass in the preview URL: pretend the Windows 11 backdrop is on (preview.html paints a wallpaper behind the frames)
+let glass = /[?&]glass/.test(location.search) || /[?&]glass/.test(window.parent?.location?.search || '');
 export function attach(fn) { emit = fn; window.__pushTabs = () => emit('tabs', { tabs, active, theme }); }
 
 export async function request(cmd, args) {
   await new Promise((r) => setTimeout(r, 30));
   switch (cmd) {
     case 'rail.init':
-      setTimeout(() => emit('tabs', { tabs, active, theme, launcherUpdate: '0.3.0', overlay: location.hash === '#update' ? 'update' : '' }), 10);
+      setTimeout(() => emit('tabs', { tabs, active, theme, glassOk: true, glass, launcherUpdate: '0.3.0', overlay: location.hash === '#update' ? 'update' : '' }), 10);
       return { version: '0.2.0', theme, debug: true };
     case 'tabs.reorder': {
       const by = new Map(tabs.map((t) => [t.id, t]));
@@ -53,12 +55,13 @@ export async function request(cmd, args) {
       window.__lastOrder = args.ids;
       return true;
     }
-    case 'tab.select': active = args.id; setTimeout(() => emit('tabs', { tabs, active, theme }), 10); return true;
+    case 'glass.set': glass = !!args.on; setTimeout(() => emit('tabs', { tabs, active, theme, glassOk: true, glass }), 10); return true;
+    case 'tab.select': active = args.id; setTimeout(() => emit('tabs', { tabs, active, theme, glassOk: true, glass }), 10); return true;
     case 'theme.set': theme = args.theme; return true;
     case 'app.restart': return window.confirm('Mock: restart DashLauncher?') ? true : false;
     case 'modules.scan': return { added: 1, removed: 0, broken: 0, total: tabs.length };
     case 'traffic.stop': return window.confirm('Stop all traffic in every dashboard now?') ? 2 : 0;
-    case 'panel.get': return { notice: notices[location.hash.slice(1)] || notices.locked, theme };
+    case 'panel.get': return { notice: notices[location.hash.slice(1)] || notices.locked, theme, glass };
     case 'mod.auto': case 'mod.check': case 'mod.update':
     case 'catalog.install': case 'update.open': case 'update.close': case 'update.check': case 'update.stage': case 'update.apply': case 'update.auto': case 'update.cancel': case 'tab.retry': case 'tab.approve': case 'tab.close': case 'catalog.download': case 'modules.open': return true;
     case 'tab.switchTo': case 'tab.reload': return false;

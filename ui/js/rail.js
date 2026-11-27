@@ -9,6 +9,7 @@ const ICON = {
   scan: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3.5 7a2 2 0 0 1 2-2h3.5l2 2.5h7.5a2 2 0 0 1 2 2V11"/><path d="M3.5 7v10.5a2 2 0 0 0 2 2H11"/><circle cx="16.5" cy="16.5" r="3.5"/><path d="m19 19 2 2"/></svg>',
   restart: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M20 12a8 8 0 1 1-2.6-5.9"/><path d="M20 4v5h-5"/></svg>',
   lock: '<svg viewBox="0 0 12 12" fill="currentColor"><rect x="2" y="5" width="8" height="6" rx="1.2"/><path d="M4 5V3.8a2 2 0 0 1 4 0V5" fill="none" stroke="currentColor" stroke-width="1.4"/></svg>',
+  glass: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><rect x="4" y="4" width="16" height="16" rx="4"/><path d="M8 15 15 8M11 17l6-6" stroke-linecap="round" opacity=".7"/></svg>',
   up: '<svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 10V2.5M2.8 5.5 6 2.3l3.2 3.2"/></svg>',
 };
 const THEME_NEXT = { system: 'light', light: 'dark', dark: 'system' };
@@ -20,12 +21,13 @@ const STATE_TEXT = {
 
 const tabsEl = document.getElementById('tabs');
 const themeBtn = document.getElementById('btn-theme');
+const glassBtn = document.getElementById('btn-glass');
 const killBtn = document.getElementById('btn-kill');
 const scanBtn = document.getElementById('btn-scan');
 const restartBtn = document.getElementById('btn-restart');
 const verEl = document.getElementById('ver');
 
-let state = { tabs: [], active: '', theme: 'system', launcherUpdate: '', overlay: '' };
+let state = { tabs: [], active: '', theme: 'system', glass: false, glassOk: false, launcherUpdate: '', overlay: '' };
 let version = '';
 
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -65,7 +67,13 @@ function render() {
   verEl.title = state.launcherUpdate ? `DashLauncher v${state.launcherUpdate} is available` : 'DashLauncher updates';
   themeBtn.innerHTML = ICON[state.theme] || ICON.system;
   themeBtn.title = THEME_LABEL[state.theme] || THEME_LABEL.system;
-  bridge.setTheme(state.theme);
+  bridge.setTheme(state.theme, state.glass);
+  // Glass: Windows 11 only (the host says whether it can); shown as a toggle under the theme button
+  glassBtn.hidden = !state.glassOk;
+  glassBtn.innerHTML = ICON.glass;
+  glassBtn.setAttribute('aria-pressed', state.glass ? 'true' : 'false');
+  glassBtn.classList.toggle('on', !!state.glass);
+  glassBtn.title = state.glass ? 'Glass: on (click to turn off)' : 'Glass: see-through window (Windows 11)';
 }
 
 // ---- drag to reorder: press on a tab and move it up or down; the order is saved by the launcher.
@@ -153,6 +161,12 @@ themeBtn.addEventListener('click', () => {
   state.theme = next;
   render();
   bridge.request('theme.set', { theme: next }).catch((err) => console.warn(err.message));
+});
+
+glassBtn.addEventListener('click', () => {
+  state.glass = !state.glass;
+  render();
+  bridge.request('glass.set', { on: state.glass }).catch((err) => { console.warn(err.message); state.glass = !state.glass; render(); });
 });
 
 scanBtn.innerHTML = ICON.scan;
