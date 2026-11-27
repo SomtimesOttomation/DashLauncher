@@ -58,8 +58,12 @@ export async function request(cmd, args = {}, timeoutMs = 30000) {
   });
 }
 
-export function setTheme(theme) {
+export function setTheme(theme, glass) {
   document.documentElement.dataset.theme = theme || 'system';
+  // glass (Windows 11 Acrylic): the host made this view transparent; launcher.css switches to translucent surfaces
+  if (glass !== undefined) {
+    if (glass) document.documentElement.dataset.glass = '1'; else delete document.documentElement.dataset.glass;
+  }
 }
 
 // Ctrl+1..9 jumps to a tab and Ctrl+Tab / Ctrl+Shift+Tab cycles, the same as inside a dashboard.
