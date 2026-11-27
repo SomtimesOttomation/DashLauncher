@@ -4,10 +4,12 @@ Changes are grouped by label: Feature, Bug/Fix, Redesign, Housekeeping. Every me
 
 ## Unreleased
 
+## Released
+
+### v0.14.0
+
 **Feature**
 - Glass (Windows 11): a new button under the theme button makes DashLauncher's window see-through, with the blurred desktop behind the tab rail and notice pages, in light and dark. Off by default; hidden on older Windows. Dashes are told through host.theme ({glass: true}) and can adopt it; until they do they stay solid.
-
-## Released
 
 ### v0.13.0
 
