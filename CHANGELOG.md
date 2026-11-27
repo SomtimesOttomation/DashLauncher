@@ -4,10 +4,12 @@ Changes are grouped by label: Feature, Bug/Fix, Redesign, Housekeeping. Every me
 
 ## Unreleased
 
+## Released
+
+### v0.15.0
+
 **Feature**
 - Glass: a Frost slider. With glass on, click (or right-click) the Glass button for a small panel with the slider (more see-through to almost solid) and Off. It applies live, is remembered, and is passed to dashes in host.theme (frost, 0-1). Cards keep a minimum frost so text stays readable.
-
-## Released
 
 ### v0.14.0
 
